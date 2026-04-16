@@ -385,7 +385,7 @@ def main():
     )
     version = os.environ.get("APP_VERSION", "dev")
     auth_link = f"\n\n➕ 添加 Outlook 账号：\n{OAUTH_REDIRECT.replace('/api/emails/oauth/outlook/callback', '/auth/outlook')}" if OAUTH_ENABLED else ""
-    send_tg(f"✅ 监控已启动 `v{version}`，共 {len(accounts)} 个账号\n\n{email_list}{auth_link}")
+    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n{email_list}{auth_link}")
 
     while True:
         for acc in accounts:
