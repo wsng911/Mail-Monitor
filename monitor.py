@@ -24,8 +24,8 @@ FORWARD_ALL   = cfg.get("forward_all", False)
 
 # OAuth2 回调服务配置
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
-OAUTH_CLIENT_ID   = cfg.get("oauth", {}).get("client_id", OUTLOOK_DEFAULT_CLIENT_ID if "OUTLOOK_DEFAULT_CLIENT_ID" in dir() else "7feada80-d946-4d06-b134-73afa3524fb7")
-OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://mail.idays.gq/api/emails/oauth/outlook/callback")
+OAUTH_CLIENT_ID   = cfg.get("oauth", {}).get("client_id", "c96fa7ab-5920-4d7a-a0fe-46af8236cee3")
+OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.gq/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
 CODE_RE = re.compile(r'\b\d{6}\b')
