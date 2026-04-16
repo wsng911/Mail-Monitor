@@ -24,7 +24,8 @@ FORWARD_ALL   = cfg.get("forward_all", False)
 
 # OAuth2 回调服务配置
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
-OAUTH_CLIENT_ID   = cfg.get("oauth", {}).get("client_id", "c96fa7ab-5920-4d7a-a0fe-46af8236cee3")
+OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "7feada80-d946-4d06-b134-73afa3524fb7")
+OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")
 OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.gq/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
@@ -256,7 +257,7 @@ def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
 AUTH_URL = (
     f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
     f"?client_id={{client_id}}&response_type=code&redirect_uri={{redirect}}"
-    f"&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=consent"
+    f"&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=select_account"
 )
 
 class OAuthHandler(BaseHTTPRequestHandler):
@@ -304,14 +305,18 @@ class OAuthHandler(BaseHTTPRequestHandler):
 
 
 def _exchange_code(code: str) -> str:
-    r = httpx.post(OUTLOOK_TOKEN_URL, data={
+    data = {
         "client_id":    OAUTH_CLIENT_ID,
         "grant_type":   "authorization_code",
         "code":         code,
         "redirect_uri": OAUTH_REDIRECT,
         "scope":        "https://graph.microsoft.com/Mail.Read offline_access",
         "token_endpoint_auth_method": "none",
-    }, timeout=15)
+    }
+    if OAUTH_CLIENT_SECRET:
+        data["client_secret"] = OAUTH_CLIENT_SECRET
+        data.pop("token_endpoint_auth_method", None)
+    r = httpx.post(OUTLOOK_TOKEN_URL, data=data, timeout=15)
     d = r.json()
     if "refresh_token" not in d:
         raise RuntimeError(d.get("error_description", d))
