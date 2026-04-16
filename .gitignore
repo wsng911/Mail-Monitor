@@ -1,0 +1,5 @@
+config/config.yaml
+config/accounts.json
+.env
+__pycache__/
+*.pyc

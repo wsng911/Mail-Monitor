@@ -1,0 +1,6 @@
+services:
+  mail-monitor:
+    image: wsng911/mail-code-monitor:latest
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
