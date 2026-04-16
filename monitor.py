@@ -375,12 +375,24 @@ def main():
         else:
             accounts.append(entry)
     log.info(f"加载 {len(accounts)} 个账号")
-    email_list = "\n".join(
-        f"`{acc['email']}`" for acc in accounts if acc.get("email")
-    )
-    version = os.environ.get("APP_VERSION", "dev")
-    auth_link = f"\n\n➕ 添加 Outlook 账号：\n{OAUTH_REDIRECT.replace('/api/emails/oauth/outlook/callback', '/auth/outlook')}" if OAUTH_ENABLED else ""
-    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n{email_list}{auth_link}")
+
+    def _group(t):
+        return "\n".join(f"`{a['email']}`" for a in accounts if a.get("type","").lower()==t and a.get("email"))
+
+    gmail_list   = _group("gmail")
+    qq_list      = _group("qq")
+    outlook_list = _group("outlook")
+
+    parts = []
+    if gmail_list:   parts.append(f"📧 Gmail：\n{gmail_list}")
+    if qq_list:      parts.append(f"📧 QQ：\n{qq_list}")
+    if outlook_list: parts.append(f"📧 Outlook：\n{outlook_list}")
+
+    auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
+    if OAUTH_ENABLED:
+        parts.append(f"➕ [添加 Outlook 账号]({auth_url})")
+
+    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
 
     while True:
         for acc in accounts:
