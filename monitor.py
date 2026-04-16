@@ -109,6 +109,16 @@ def decode_subject(msg) -> str:
     raw, enc = decode_header(msg.get("Subject", ""))[0]
     return raw.decode(enc or "utf-8") if isinstance(raw, bytes) else (raw or "")
 
+def decode_from(msg) -> str:
+    parts = decode_header(msg.get("From", ""))
+    result = []
+    for raw, enc in parts:
+        if isinstance(raw, bytes):
+            result.append(raw.decode(enc or "utf-8", errors="replace"))
+        else:
+            result.append(raw or "")
+    return "".join(result)
+
 def parse_date(msg) -> str:
     from email.utils import parsedate_to_datetime
     try:
@@ -117,7 +127,7 @@ def parse_date(msg) -> str:
         return ""
 
 # ── 通用 IMAP 轮询（Gmail / QQ 等应用密码方案）───────────────────────────────
-def _poll_imap(acc: dict, host: str) -> list[dict]:
+def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
     results = []
     try:
         imap = imaplib.IMAP4_SSL(host, 993)
@@ -133,9 +143,12 @@ def _poll_imap(acc: dict, host: str) -> list[dict]:
             body    = extract_imap_body(msg)
             date    = parse_date(msg)
             code    = find_code(body) or find_code(subject)
+            if skip_existing:
+                imap.store(uid, "+FLAGS", "\\Seen")
+                continue
             if code or FORWARD_ALL:
                 results.append({"label": acc.get("label", acc["email"]), "subject": subject,
-                                 "from": str(msg.get("From", "")), "code": code, "body": body, "date": date})
+                                 "from": decode_from(msg), "code": code, "body": body, "date": date})
             imap.store(uid, "+FLAGS", "\\Seen")
         imap.logout()
     except Exception as e:
@@ -143,13 +156,12 @@ def _poll_imap(acc: dict, host: str) -> list[dict]:
     return results
 
 # ── Gmail（应用专用密码）─────────────────────────────────────────────────────
-def poll_gmail(acc: dict) -> list[dict]:
-    return _poll_imap(acc, "imap.gmail.com")
+def poll_gmail(acc: dict, skip_existing: bool = False) -> list[dict]:
+    return _poll_imap(acc, "imap.gmail.com", skip_existing=skip_existing)
 
 # ── QQ 邮箱（授权码）─────────────────────────────────────────────────────────
-def poll_qq(acc: dict) -> list[dict]:
-    return _poll_imap(acc, "imap.qq.com")
-    return results
+def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
+    return _poll_imap(acc, "imap.qq.com", skip_existing=skip_existing)
 
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
@@ -184,21 +196,21 @@ def _outlook_get_token(acc: dict) -> tuple[str, str]:
     t = _outlook_tokens[email]
     return t["access_token"], t["token_type"]
 
-def poll_outlook(acc: dict) -> list[dict]:
+def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
     """acc: {email, refresh_token, client_id(可选), label(可选)}"""
     results = []
     try:
         token, token_type = _outlook_get_token(acc)
         label = acc.get("label", acc["email"])
         if token_type == "imap":
-            results = _outlook_imap(acc, token, label)
+            results = _outlook_imap(acc, token, label, skip_existing=skip_existing)
         else:
-            results = _outlook_graph(acc, token, label)
+            results = _outlook_graph(acc, token, label, skip_existing=skip_existing)
     except Exception as e:
         log.error(f"[Outlook:{acc['email']}] {e}")
     return results
 
-def _outlook_graph(acc: dict, token: str, label: str) -> list[dict]:
+def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
     results = []
     headers = {"Authorization": f"Bearer {token}"}
     r = httpx.get("https://graph.microsoft.com/v1.0/me/messages",
@@ -219,13 +231,13 @@ def _outlook_graph(acc: dict, token: str, label: str) -> list[dict]:
         except Exception:
             date = raw_dt[:16]
         code    = find_code(body) or find_code(subject)
-        if code or FORWARD_ALL:
+        if not skip_existing and (code or FORWARD_ALL):
             results.append({"label": label, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
         httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
                     json={"isRead": True}, headers=headers, timeout=10)
     return results
 
-def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
+def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
     results = []
     auth_str = f"user={acc['email']}\x01auth=Bearer {token}\x01\x01"
     try:
@@ -244,9 +256,12 @@ def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
                 body    = extract_imap_body(msg)
                 date    = parse_date(msg)
                 code    = find_code(body) or find_code(subject)
+                if skip_existing:
+                    imap.store(uid, "+FLAGS", "\\Seen")
+                    continue
                 if code or FORWARD_ALL:
                     results.append({"label": label, "subject": subject,
-                                    "from": str(msg.get("From", "")), "code": code, "body": body, "date": date})
+                                    "from": decode_from(msg), "code": code, "body": body, "date": date})
                 imap.store(uid, "+FLAGS", "\\Seen")
         imap.logout()
     except Exception as e:
@@ -394,16 +409,17 @@ def main():
 
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
 
+    first_run = True
     while True:
         for acc in accounts:
             t = acc.get("type", "").lower()
             try:
                 if t == "gmail":
-                    items = poll_gmail(acc)
+                    items = poll_gmail(acc, skip_existing=first_run)
                 elif t == "qq":
-                    items = poll_qq(acc)
+                    items = poll_qq(acc, skip_existing=first_run)
                 elif t == "outlook":
-                    items = poll_outlook(acc)
+                    items = poll_outlook(acc, skip_existing=first_run)
                 else:
                     log.warning(f"未知账号类型: {t}")
                     continue
@@ -445,6 +461,7 @@ def main():
                                 send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
             except Exception as e:
                 log.error(f"账号 {acc.get('email')} 轮询异常: {e}")
+        first_run = False
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
