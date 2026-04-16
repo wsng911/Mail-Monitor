@@ -257,7 +257,7 @@ def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
 AUTH_URL = (
     f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
     f"?client_id={{client_id}}&response_type=code&redirect_uri={{redirect}}"
-    f"&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=select_account"
+    f"&scope=https://graph.microsoft.com/Mail.Read%20https://graph.microsoft.com/User.Read%20offline_access&prompt=select_account"
 )
 
 class OAuthHandler(BaseHTTPRequestHandler):
@@ -311,7 +311,7 @@ def _exchange_code(code: str) -> tuple[str, str]:
         "grant_type":   "authorization_code",
         "code":         code,
         "redirect_uri": OAUTH_REDIRECT,
-        "scope":        "https://graph.microsoft.com/Mail.Read offline_access",
+        "scope":        "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read offline_access",
         "token_endpoint_auth_method": "none",
     }
     if OAUTH_CLIENT_SECRET:
@@ -335,29 +335,19 @@ def _exchange_code(code: str) -> tuple[str, str]:
 
 
 def _save_outlook_account(refresh_token: str, email: str):
-    """将新 Outlook 账号追加到 config.yaml，保持原有格式"""
-    with open(CONFIG_FILE) as f:
-        content = f.read()
-
+    """将新 Outlook 账号追加到 config.yaml 末尾"""
     new_entry = (
-        f"      - label: {email or 'outlook'}\n"
+        f"      - label: \"{email}\"\n"
         f"        email: \"{email}\"\n"
         f"        refresh_token: \"{refresh_token}\"\n"
     )
+    with open(CONFIG_FILE) as f:
+        content = f.read()
 
     if "type: outlook" in content:
-        # 在已有 outlook mailboxes 末尾追加
-        idx = content.rfind("type: outlook")
-        insert_pos = content.rfind("\n", 0, idx)
-        content = content[:insert_pos] + "\n" + new_entry + content[insert_pos:]
+        content = content.rstrip() + "\n" + new_entry
     else:
-        # 新增 outlook 块
-        outlook_block = (
-            f"  - type: outlook\n"
-            f"    mailboxes:\n"
-            f"{new_entry}"
-        )
-        content = content.rstrip() + "\n" + outlook_block + "\n"
+        content = content.rstrip() + "\n  - type: outlook\n    mailboxes:\n" + new_entry
 
     with open(CONFIG_FILE, "w") as f:
         f.write(content)
