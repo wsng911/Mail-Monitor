@@ -324,25 +324,38 @@ def _exchange_code(code: str) -> str:
 
 
 def _save_outlook_account(refresh_token: str):
-    """将新账号追加写入 config.yaml"""
+    """将新 Outlook 账号追加到 config.yaml 末尾"""
+    new_entry = (
+        f"\n  - client_id: {OAUTH_CLIENT_ID}\n"
+        f"    email: ''\n"
+        f"    refresh_token: '{refresh_token}'\n"
+    )
     with open(CONFIG_FILE) as f:
-        raw = f.read()
-    data = yaml.safe_load(raw)
-
-    new_mb = {"email": "", "refresh_token": refresh_token, "client_id": OAUTH_CLIENT_ID}
+        content = f.read()
 
     # 找到 outlook type 块追加，没有则新建
-    accounts = data.get("accounts", [])
-    for entry in accounts:
-        if entry.get("type") == "outlook":
-            entry.setdefault("mailboxes", []).append(new_mb)
-            break
+    if "type: outlook" in content:
+        # 在最后一个 outlook mailboxes 列表末尾追加
+        insert_marker = "  type: outlook"
+        idx = content.rfind(insert_marker)
+        insert_pos = content.rfind("\n", 0, idx)
+        content = content[:insert_pos] + new_entry + content[insert_pos:]
     else:
-        accounts.append({"type": "outlook", "mailboxes": [new_mb]})
-    data["accounts"] = accounts
+        # 在 accounts 末尾新增 outlook 块
+        outlook_block = (
+            f"- mailboxes:\n"
+            f"  - client_id: {OAUTH_CLIENT_ID}\n"
+            f"    email: ''\n"
+            f"    refresh_token: '{refresh_token}'\n"
+            f"  type: outlook\n"
+        )
+        if "accounts:" in content:
+            content = content.rstrip() + "\n" + outlook_block
+        else:
+            content += f"\naccounts:\n{outlook_block}"
 
     with open(CONFIG_FILE, "w") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+        f.write(content)
 
 
 def start_oauth_server():
