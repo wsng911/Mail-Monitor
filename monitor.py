@@ -310,6 +310,7 @@ def _exchange_code(code: str) -> str:
         "code":         code,
         "redirect_uri": OAUTH_REDIRECT,
         "scope":        "https://graph.microsoft.com/Mail.Read offline_access",
+        "token_endpoint_auth_method": "none",
     }, timeout=15)
     d = r.json()
     if "refresh_token" not in d:
