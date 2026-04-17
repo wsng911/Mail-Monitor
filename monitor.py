@@ -210,10 +210,13 @@ def _outlook_refresh(acc: dict) -> dict:
         "https://graph.microsoft.com/.default offline_access",
         "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
     ]:
-        r = httpx.post(OUTLOOK_TOKEN_URL, data={
+        payload = {
             "client_id": client_id, "grant_type": "refresh_token",
             "refresh_token": acc["refresh_token"], "scope": scope,
-        }, timeout=15)
+        }
+        if OAUTH_CLIENT_SECRET:
+            payload["client_secret"] = OAUTH_CLIENT_SECRET
+        r = httpx.post(OUTLOOK_TOKEN_URL, data=payload, timeout=15)
         d = r.json()
         if r.status_code == 200 and "access_token" in d:
             returned = d.get("scope", "").lower()
