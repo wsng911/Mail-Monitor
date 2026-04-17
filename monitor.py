@@ -468,7 +468,9 @@ def _process_gmail_push(data: dict):
         )
         if r.status_code != 200:
             return
-        for record in r.json().get("history", []):
+        history_data = r.json()
+        log.info(f"[Gmail Push] {email} history records: {len(history_data.get('history', []))}")
+        for record in history_data.get("history", []):
             for added in record.get("messagesAdded", []):
                 msg_id = added["message"]["id"]
                 if msg_id in _processed_msg_ids:
