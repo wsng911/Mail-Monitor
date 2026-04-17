@@ -705,18 +705,30 @@ def _save_gmail_token(email: str, refresh_token: str):
     while i < len(lines):
         line = lines[i]
         new_lines.append(line)
-        # 找到匹配的 email 行
         if not inserted and re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
             indent = len(line) - len(line.lstrip())
             spaces = " " * indent
-            # 检查下一行是否已有 gmail_refresh_token
             if i + 1 < len(lines) and "gmail_refresh_token:" in lines[i + 1]:
-                i += 1  # 跳过旧的 token 行
+                i += 1
                 new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
             else:
                 new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
             inserted = True
         i += 1
+
+    if not inserted:
+        # 账号不存在，追加到 gmail mailboxes 末尾或新建
+        content = "".join(new_lines)
+        new_entry = (
+            f"      - email: \"{email}\"\n"
+            f"        label: \"{email}\"\n"
+            f"        gmail_refresh_token: \"{refresh_token}\"\n"
+        )
+        if "type: gmail" in content:
+            content = content.rstrip() + "\n" + new_entry
+        else:
+            content = content.rstrip() + "\n  - type: gmail\n    mailboxes:\n" + new_entry
+        new_lines = [content]
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
