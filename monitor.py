@@ -37,10 +37,15 @@ CODE_RE = re.compile(r'\b\d{6}\b')
 def find_code(text: str) -> str | None:
     for m in CODE_RE.finditer(text or ""):
         c = m.group()
-        # 排除全同数字(111111)和简单交替(123456/654321/121212等常见误判)
+        # 排除全同数字
         if len(set(c)) == 1:
             continue
-        if c in ("123456", "654321", "000000"):
+        # 排除常见误判
+        if c in ("123456", "654321", "000000", "100000", "200000", "300000",
+                 "400000", "500000", "600000", "700000", "800000", "900000"):
+            continue
+        # 排除末尾4个0（如 120000、250000 等大整数）
+        if c.endswith("0000"):
             continue
         return c
     return None
@@ -129,7 +134,6 @@ def decode_from(msg) -> str:
 
 def extract_to_email(msg) -> str:
     """提取实际收件地址（支持 +tag 别名）"""
-    import re
     to = msg.get("Delivered-To") or msg.get("To", "")
     m = re.search(r'[\w.+%-]+@[\w.-]+', to)
     return m.group(0) if m else ""
@@ -142,11 +146,28 @@ def parse_date(msg) -> str:
         return ""
 
 # ── 通用 IMAP 轮询（Gmail / QQ 等应用密码方案）───────────────────────────────
+_imap_pool: dict[str, imaplib.IMAP4_SSL] = {}  # email -> 复用连接
+_imap_lock = threading.Lock()
+
+def _get_imap(email: str, app_pass: str, host: str) -> imaplib.IMAP4_SSL:
+    """获取复用的 IMAP 连接，断开时自动重连"""
+    with _imap_lock:
+        conn = _imap_pool.get(email)
+        if conn:
+            try:
+                conn.noop()
+                return conn
+            except Exception:
+                _imap_pool.pop(email, None)
+        conn = imaplib.IMAP4_SSL(host, 993)
+        conn.login(email, app_pass)
+        _imap_pool[email] = conn
+        return conn
+
 def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
     results = []
     try:
-        imap = imaplib.IMAP4_SSL(host, 993)
-        imap.login(acc["email"], acc["app_pass"])
+        imap = _get_imap(acc["email"], acc["app_pass"], host)
         imap.select("INBOX")
         _, data = imap.search(None, "UNSEEN")
         for uid in data[0].split():
@@ -166,9 +187,9 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
                 results.append({"label": to_addr, "subject": subject,
                                  "from": decode_from(msg), "code": code, "body": body, "date": date})
             imap.store(uid, "+FLAGS", "\\Seen")
-        imap.logout()
     except Exception as e:
         log.error(f"[IMAP:{acc['email']}] {e}")
+        _imap_pool.pop(acc["email"], None)  # 出错时清除连接，下次重连
     return results
 
 # ── Gmail（应用专用密码）─────────────────────────────────────────────────────
