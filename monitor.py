@@ -402,15 +402,27 @@ def _exchange_code(code: str) -> tuple[str, str]:
 
 
 def _save_outlook_account(refresh_token: str, email: str):
-    """将新 Outlook 账号追加到 config.yaml 末尾"""
+    """更新已有账号的 token，不存在则追加"""
+    with open(CONFIG_FILE) as f:
+        content = f.read()
+
+    # 已存在则替换 refresh_token
+    if f'email: "{email}"' in content or f"email: {email}" in content:
+        import re as _re
+        # 找到该邮箱后的第一个 refresh_token 行并替换
+        pattern = rf'(email: ["\']?{_re.escape(email)}["\']?\n\s+refresh_token: )[^\n]+'
+        new_content = _re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
+        if new_content != content:
+            with open(CONFIG_FILE, "w") as f:
+                f.write(new_content)
+            return
+
+    # 不存在则追加
     new_entry = (
         f"      - label: \"{email}\"\n"
         f"        email: \"{email}\"\n"
         f"        refresh_token: \"{refresh_token}\"\n"
     )
-    with open(CONFIG_FILE) as f:
-        content = f.read()
-
     if "type: outlook" in content:
         content = content.rstrip() + "\n" + new_entry
     else:
