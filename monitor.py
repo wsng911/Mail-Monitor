@@ -342,9 +342,9 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
     return results
 
 # ── Gmail Push OAuth ──────────────────────────────────────────────────────────
-_gmail_tokens: dict[str, dict] = {}  # email -> {access_token, refresh_token, expiry}
-_gmail_push_queue: list[dict] = []   # 待处理的 push 消息
+_gmail_tokens: dict[str, dict] = {}  # email -> {access_token, refresh_token, expiry, label}
 _gmail_push_lock = threading.Lock()
+_gmail_last_history: dict[str, str] = {}  # email -> last processed historyId
 
 GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify"
 
@@ -376,7 +376,9 @@ def _gmail_watch(email: str):
             timeout=10
         )
         if r.status_code == 200:
-            log.info(f"[Gmail Push] {email} watch 注册成功，到期: {r.json().get('expiration')}")
+            data = r.json()
+            _gmail_last_history[email] = data.get("historyId", "")
+            log.info(f"[Gmail Push] {email} watch 注册成功，到期: {data.get('expiration')}")
         else:
             log.error(f"[Gmail Push] {email} watch 失败: {r.text[:200]}")
     except Exception as e:
@@ -459,47 +461,51 @@ def _process_gmail_push(data: dict):
             return
 
         token = _gmail_refresh_token(email)
-        # 直接查未读邮件，不依赖 historyId
+        # 用上次记录的 historyId，没有则用推送的 historyId
+        start_id = _gmail_last_history.get(email) or str(max(1, int(history_id) - 1))
         r = httpx.get(
-            f"https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            f"https://gmail.googleapis.com/gmail/v1/users/me/history",
             headers={"Authorization": f"Bearer {token}"},
-            params={"q": "is:unread in:inbox", "maxResults": 10},
+            params={"startHistoryId": start_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
             timeout=10
         )
         if r.status_code != 200:
+            _gmail_last_history[email] = history_id
             return
-        messages = r.json().get("messages", [])
-        log.info(f"[Gmail Push] {email} unread messages: {len(messages)}")
-        for msg_info in messages:
-            msg_id = msg_info["id"]
-            if msg_id in _processed_msg_ids:
-                continue
-            _processed_msg_ids.add(msg_id)
-            item = _gmail_fetch_message(email, msg_id)
-            if not item:
-                continue
-            body = item["body"]
-            code = find_code(body) or find_code(item["subject"])
-            label = _gmail_tokens.get(email, {}).get("label", email)
-            html_body = item.get("html_body", "")
-            if code or FORWARD_ALL:
-                plain = html_to_text(body)
-                if code:
-                    text = (f"`{code}`\n\n📬 *{label}*\n"
-                            f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
-                    log.info(f"[Gmail Push:{label}] 验证码: {code}")
-                    send_tg(text)
-                    if FORWARD_ALL and html_body:
-                        send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
-                elif FORWARD_ALL:
-                    caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
-                               f"时间: {item['date']}\n主题: {item['subject']}")
-                    if plain and len(plain) >= 50:
-                        send_tg(caption + f"\n\n{plain[:1500]}")
-                    else:
-                        send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                    if html_body:
-                        send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
+        history_data = r.json()
+        # 更新 historyId
+        _gmail_last_history[email] = history_data.get("historyId", history_id)
+        for record in history_data.get("history", []):
+            for added in record.get("messagesAdded", []):
+                msg_id = added["message"]["id"]
+                if msg_id in _processed_msg_ids:
+                    continue
+                _processed_msg_ids.add(msg_id)
+                item = _gmail_fetch_message(email, msg_id)
+                if not item:
+                    continue
+                body = item["body"]
+                code = find_code(body) or find_code(item["subject"])
+                label = _gmail_tokens.get(email, {}).get("label", email)
+                html_body = item.get("html_body", "")
+                if code or FORWARD_ALL:
+                    plain = html_to_text(body)
+                    if code:
+                        text = (f"`{code}`\n\n📬 *{label}*\n"
+                                f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
+                        log.info(f"[Gmail Push:{label}] 验证码: {code}")
+                        send_tg(text)
+                        if FORWARD_ALL and html_body:
+                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
+                    elif FORWARD_ALL:
+                        caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
+                                   f"时间: {item['date']}\n主题: {item['subject']}")
+                        if plain and len(plain) >= 50:
+                            send_tg(caption + f"\n\n{plain[:1500]}")
+                        else:
+                            send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                        if html_body:
+                            send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
