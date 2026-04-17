@@ -33,6 +33,7 @@ OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.g
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
+CODE_RE = re.compile(r'\b\d{6}\b')
 
 def find_code(text: str) -> str | None:
     for m in CODE_RE.finditer(text or ""):
