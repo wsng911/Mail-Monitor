@@ -404,19 +404,20 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
         except Exception:
             pass
 
-        # 提取 body
-        body = ""
+        # 提取 body（plain 用于验证码提取，html 用于附件）
+        plain_body = ""
+        html_body = ""
         def extract_parts(parts):
-            nonlocal body
+            nonlocal plain_body, html_body
             for p in parts:
-                if p.get("mimeType") == "text/plain" and not body:
+                if p.get("mimeType") == "text/plain" and not plain_body:
                     data = p.get("body", {}).get("data", "")
                     if data:
-                        body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
-                elif p.get("mimeType") == "text/html" and not body:
+                        plain_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                elif p.get("mimeType") == "text/html" and not html_body:
                     data = p.get("body", {}).get("data", "")
                     if data:
-                        body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                        html_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
                 if p.get("parts"):
                     extract_parts(p["parts"])
 
@@ -426,7 +427,14 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
         else:
             data = payload.get("body", {}).get("data", "")
             if data:
-                body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                ct = payload.get("mimeType", "")
+                decoded = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                if "html" in ct:
+                    html_body = decoded
+                else:
+                    plain_body = decoded
+
+        body = plain_body or html_body
 
         # 标为已读
         httpx.post(
@@ -435,7 +443,7 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
             json={"removeLabelIds": ["UNREAD"]},
             timeout=5
         )
-        return {"subject": subject, "from": from_, "date": date, "body": body, "email": email}
+        return {"subject": subject, "from": from_, "date": date, "body": body, "html_body": html_body, "email": email}
     except Exception as e:
         log.error(f"[Gmail Push] 获取邮件失败 {email}/{msg_id}: {e}")
         return None
@@ -472,16 +480,16 @@ def _process_gmail_push(data: dict):
                 body = item["body"]
                 code = find_code(body) or find_code(item["subject"])
                 label = _gmail_tokens.get(email, {}).get("label", email)
+                html_body = item.get("html_body", "")
                 if code or FORWARD_ALL:
-                    is_html = "<" in body and ">" in body
                     plain = html_to_text(body)
                     if code:
                         text = (f"`{code}`\n\n📬 *{label}*\n"
                                 f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
                         log.info(f"[Gmail Push:{label}] 验证码: {code}")
                         send_tg(text)
-                        if FORWARD_ALL and is_html:
-                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", body)
+                        if FORWARD_ALL and html_body:
+                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
                     elif FORWARD_ALL:
                         caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
                                    f"时间: {item['date']}\n主题: {item['subject']}")
@@ -489,8 +497,8 @@ def _process_gmail_push(data: dict):
                             send_tg(caption + f"\n\n{plain[:1500]}")
                         else:
                             send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                        if is_html:
-                            send_tg_document(caption, f"{item['subject'][:40]}.html", body)
+                        if html_body:
+                            send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
