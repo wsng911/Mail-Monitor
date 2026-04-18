@@ -119,6 +119,26 @@ def send_tg_document(filename: str, content: str):
     except Exception as e:
         log.error(f"TG 附件推送异常: {e}")
 
+def wrap_html(html_body: str, *, subject: str = "", from_: str = "", to: str = "",
+              date: str = "", received: str = "") -> str:
+    """在 HTML 邮件顶部注入邮件头信息"""
+    def row(label, val):
+        return f"<tr><td style='color:#888;white-space:nowrap;padding:2px 12px 2px 0'>{label}</td><td style='word-break:break-all'>{html.escape(val)}</td></tr>" if val else ""
+    header = (
+        "<div style='font-family:sans-serif;font-size:13px;background:#1e1e1e;color:#ccc;"
+        "border-bottom:1px solid #333;padding:12px 16px;margin-bottom:12px'>"
+        f"<div style='font-size:15px;font-weight:bold;margin-bottom:8px'>{html.escape(subject)}</div>"
+        "<table style='border-collapse:collapse'>"
+        + row("发件人", from_)
+        + row("收件人", to)
+        + row("发送时间", date)
+        + row("送达时间", received)
+        + "</table></div>"
+    )
+    if "<body" in html_body.lower():
+        return re.sub(r'(<body[^>]*>)', r'\1' + header, html_body, count=1, flags=re.IGNORECASE)
+    return header + html_body
+
 # ── 工具 ──────────────────────────────────────────────────────────────────────
 def extract_imap_body(msg) -> tuple[str, str]:
     """返回 (plain_body, html_body)"""
@@ -207,7 +227,9 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
             to_addr = extract_to_email(msg) or acc.get("label", acc["email"])
             if code or FORWARD_ALL:
                 results.append({"label": to_addr, "subject": subject,
-                                 "from": decode_from(msg), "code": code, "body": body,
+                                 "from": decode_from(msg), "to": to_addr,
+                                 "received": parse_date(msg),
+                                 "code": code, "body": body,
                                  "html_body": html_body, "date": date})
             imap.store(uid, "+FLAGS", "\\Seen")
     except Exception as e:
@@ -302,7 +324,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             log.info(f"[QQ IDLE:{to_addr}] 验证码: {code}")
             send_tg(text)
             if FORWARD_ALL and is_html:
-                send_tg_document(f"{subject[:40]}.html", html_body)
+                send_tg_document(f"{subject[:40]}.html",
+                                 wrap_html(html_body, subject=subject, from_=sender, to=to_addr, date=date))
         elif FORWARD_ALL:
             header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
@@ -313,7 +336,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             else:
                 send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
             if is_html:
-                send_tg_document(f"{subject[:40]}.html", html_body)
+                send_tg_document(f"{subject[:40]}.html",
+                                 wrap_html(html_body, subject=subject, from_=sender, to=to_addr, date=date))
     except Exception as e:
         log.error(f"[QQ IDLE] 处理邮件失败: {e}")
 
@@ -561,7 +585,8 @@ def _process_outlook_push(data: dict):
                     log.info(f"[Outlook Push:{label}] 验证码: {code}")
                     send_tg(text)
                     if FORWARD_ALL and is_html:
-                        send_tg_document(f"{subject[:40]}.html", body)
+                        send_tg_document(f"{subject[:40]}.html",
+                                         wrap_html(body, subject=subject, from_=sender, to=label, date=date))
                 elif FORWARD_ALL:
                     plain = html_to_text(body)
                     caption = f"📩 *{label}*\n发件人: {sender}\n时间: {date}\n主题: {subject}"
@@ -570,7 +595,8 @@ def _process_outlook_push(data: dict):
                     else:
                         send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
                     if is_html:
-                        send_tg_document(f"{subject[:40]}.html", body)
+                        send_tg_document(f"{subject[:40]}.html",
+                                         wrap_html(body, subject=subject, from_=sender, to=label, date=date))
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
 
@@ -1212,7 +1238,10 @@ def main():
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
                 send_tg(text)
                 if FORWARD_ALL and is_html and body_raw:
-                    send_tg_document(f"{item['subject'][:40]}.html", html_body)
+                    send_tg_document(f"{item['subject'][:40]}.html",
+                                     wrap_html(html_body, subject=item['subject'], from_=item['from'],
+                                               to=item.get('to', item['label']), date=item.get('date', ''),
+                                               received=item.get('received', '')))
             else:
                 header = (f">{_esc('📩')} *{_esc(item['label'])}*\n"
                           f">{_esc('发件人')}: {_esc(item['from'])}\n"
@@ -1224,11 +1253,17 @@ def main():
                     text = header + f"\n\n{spoiler}"
                     send_tg(text)
                     if is_html and len(plain) > 1500:
-                        send_tg_document(f"{item['subject'][:40]}.html", html_body)
+                        send_tg_document(f"{item['subject'][:40]}.html",
+                                         wrap_html(html_body, subject=item['subject'], from_=item['from'],
+                                                   to=item.get('to', item['label']), date=item.get('date', ''),
+                                                   received=item.get('received', '')))
                 else:
                     send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
                     if is_html:
-                        send_tg_document(f"{item['subject'][:40]}.html", html_body)
+                        send_tg_document(f"{item['subject'][:40]}.html",
+                                         wrap_html(html_body, subject=item['subject'], from_=item['from'],
+                                                   to=item.get('to', item['label']), date=item.get('date', ''),
+                                                   received=item.get('received', '')))
         first_run = False
         time.sleep(POLL_INTERVAL)
 
