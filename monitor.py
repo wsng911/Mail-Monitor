@@ -79,7 +79,9 @@ class _TextExtractor(HTMLParser):
         if not self._skip:
             self._parts.append(data)
     def get_text(self):
-        return re.sub(r'\n{3,}', '\n\n', "".join(self._parts)).strip()
+        lines = "".join(self._parts).splitlines()
+        lines = [l for l in lines if l.strip()]
+        return re.sub(r'\n{3,}', '\n\n', "\n".join(lines)).strip()
 
 def html_to_text(raw: str) -> str:
     try:
