@@ -120,7 +120,8 @@ def send_tg_document(content: str):
         log.error(f"TG 附件推送异常: {e}")
 
 # ── 工具 ──────────────────────────────────────────────────────────────────────
-def extract_imap_body(msg) -> str:
+def extract_imap_body(msg) -> tuple[str, str]:
+    """返回 (plain_body, html_body)"""
     plain = html_body = None
     if msg.is_multipart():
         for part in msg.walk():
@@ -129,9 +130,13 @@ def extract_imap_body(msg) -> str:
                 plain = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
             elif ct == "text/html" and html_body is None:
                 html_body = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
-        return plain or html_body or ""
+        return plain or html_body or "", html_body or ""
     payload = msg.get_payload(decode=True)
-    return payload.decode(msg.get_content_charset() or "utf-8", errors="replace") if payload else ""
+    decoded = payload.decode(msg.get_content_charset() or "utf-8", errors="replace") if payload else ""
+    ct = msg.get_content_type()
+    if "html" in ct:
+        return decoded, decoded
+    return decoded, ""
 
 def decode_subject(msg) -> str:
     raw, enc = decode_header(msg.get("Subject", ""))[0]
@@ -193,7 +198,7 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
                 continue
             msg = email_lib.message_from_bytes(raw[0][1])
             subject = decode_subject(msg)
-            body    = extract_imap_body(msg)
+            body, html_body = extract_imap_body(msg)
             date    = parse_date(msg)
             code    = find_code(body) or find_code(subject)
             if skip_existing:
@@ -202,7 +207,8 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
             to_addr = extract_to_email(msg) or acc.get("label", acc["email"])
             if code or FORWARD_ALL:
                 results.append({"label": to_addr, "subject": subject,
-                                 "from": decode_from(msg), "code": code, "body": body, "date": date})
+                                 "from": decode_from(msg), "code": code, "body": body,
+                                 "html_body": html_body, "date": date})
             imap.store(uid, "+FLAGS", "\\Seen")
     except Exception as e:
         log.error(f"[IMAP:{acc['email']}] {e}")
@@ -334,7 +340,7 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
                     continue
                 msg = email_lib.message_from_bytes(raw[0][1])
                 subject = decode_subject(msg)
-                body    = extract_imap_body(msg)
+                body, html_body = extract_imap_body(msg)
                 date    = parse_date(msg)
                 code    = find_code(body) or find_code(subject)
                 if skip_existing:
@@ -342,7 +348,8 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
                     continue
                 if code or FORWARD_ALL:
                     results.append({"label": label, "subject": subject,
-                                    "from": decode_from(msg), "code": code, "body": body, "date": date})
+                                    "from": decode_from(msg), "code": code, "body": body,
+                                    "html_body": html_body, "date": date})
                 imap.store(uid, "+FLAGS", "\\Seen")
         imap.logout()
     except Exception as e:
@@ -1004,8 +1011,9 @@ def main():
 
         for item in all_items:
             body_raw = item.get("body", "")
+            html_body = item.get("html_body", "") or body_raw
             plain = html_to_text(body_raw)
-            is_html = "<" in body_raw and ">" in body_raw
+            is_html = bool(item.get("html_body"))
 
             if item.get("code"):
                 text = (f"`{item['code']}`\n\n"
@@ -1016,7 +1024,7 @@ def main():
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
                 send_tg(text)
                 if FORWARD_ALL and is_html and body_raw:
-                    send_tg_document(f"{item['subject'][:40]}.html", body_raw)
+                    send_tg_document(f"{item['subject'][:40]}.html", html_body)
             else:
                 header = (f">{_esc('📩')} *{_esc(item['label'])}*\n"
                           f">{_esc('发件人')}: {_esc(item['from'])}\n"
@@ -1028,11 +1036,11 @@ def main():
                     text = header + f"\n\n{spoiler}"
                     send_tg(text)
                     if is_html and len(plain) > 1500:
-                        send_tg_document(f"{item['subject'][:40]}.html", body_raw)
+                        send_tg_document(f"{item['subject'][:40]}.html", html_body)
                 else:
                     send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
-                    if is_html and body_raw:
-                        send_tg_document(f"{item['subject'][:40]}.html", body_raw)
+                    if is_html:
+                        send_tg_document(f"{item['subject'][:40]}.html", html_body)
         first_run = False
         time.sleep(POLL_INTERVAL)
 
