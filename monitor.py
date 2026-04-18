@@ -7,7 +7,7 @@ from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -156,11 +156,13 @@ def parse_date(msg) -> str:
 
 # ── 通用 IMAP 轮询（Gmail / QQ 等应用密码方案）───────────────────────────────
 _imap_pool: dict[str, imaplib.IMAP4_SSL] = {}  # email -> 复用连接
-_imap_lock = threading.Lock()
+_imap_locks: dict[str, threading.Lock] = {}   # email -> 独立锁
 
 def _get_imap(email: str, app_pass: str, host: str) -> imaplib.IMAP4_SSL:
-    """获取复用的 IMAP 连接，断开时自动重连"""
-    with _imap_lock:
+    """获取复用的 IMAP 连接，断开时自动重连（每账号独立锁）"""
+    if email not in _imap_locks:
+        _imap_locks[email] = threading.Lock()
+    with _imap_locks[email]:
         conn = _imap_pool.get(email)
         if conn:
             try:
@@ -341,6 +343,129 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
         log.error(f"[Outlook IMAP:{acc['email']}] {e}")
     return results
 
+# ── Outlook Change Notifications ─────────────────────────────────────────────
+_outlook_subscriptions: dict[str, str] = {}  # email -> subscription_id
+OUTLOOK_PUSH_CALLBACK = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/api/outlook/push")
+
+def _outlook_subscribe(acc: dict):
+    """注册 Outlook Change Notification 订阅，有效期 3 天"""
+    email = acc["email"]
+    try:
+        token, _ = _outlook_get_token(acc)
+        # 先删旧订阅
+        old_sub = _outlook_subscriptions.get(email)
+        if old_sub:
+            try:
+                httpx.delete(f"https://graph.microsoft.com/v1.0/subscriptions/{old_sub}",
+                             headers={"Authorization": f"Bearer {token}"}, timeout=10)
+            except Exception:
+                pass
+
+        expiry = (datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+        # 3 天后过期
+        expiry_dt = datetime.now(timezone.utc) + timedelta(days=2, hours=23)
+        expiry = expiry_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        r = httpx.post(
+            "https://graph.microsoft.com/v1.0/subscriptions",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "changeType": "created",
+                "notificationUrl": OUTLOOK_PUSH_CALLBACK,
+                "resource": "me/mailFolders('Inbox')/messages",
+                "expirationDateTime": expiry,
+                "clientState": email,
+            },
+            timeout=15
+        )
+        if r.status_code in (200, 201):
+            sub_id = r.json().get("id")
+            _outlook_subscriptions[email] = sub_id
+            log.info(f"[Outlook Push] {email} 订阅成功，到期: {expiry}")
+        else:
+            log.error(f"[Outlook Push] {email} 订阅失败: {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        log.error(f"[Outlook Push] {email} 订阅异常: {e}")
+
+def _process_outlook_push(data: dict):
+    """处理 Microsoft Graph Change Notification"""
+    try:
+        for notification in data.get("value", []):
+            email = notification.get("clientState", "")
+            resource = notification.get("resourceData", {})
+            msg_id = resource.get("id", "")
+            if not email or not msg_id or msg_id in _processed_msg_ids:
+                continue
+            _processed_msg_ids.add(msg_id)
+
+            # 找到对应账号
+            acc = next((a for a in _outlook_accounts if a.get("email") == email), None)
+            if not acc:
+                continue
+
+            token, _ = _outlook_get_token(acc)
+            r = httpx.get(
+                f"https://graph.microsoft.com/v1.0/me/messages/{msg_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "subject,from,body,receivedDateTime,isRead"},
+                timeout=10
+            )
+            if r.status_code != 200:
+                continue
+            msg = r.json()
+            if msg.get("isRead"):
+                continue
+
+            subject = msg.get("subject", "")
+            sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
+            body    = msg.get("body", {}).get("content", "")
+            raw_dt  = msg.get("receivedDateTime", "")
+            try:
+                date = datetime.fromisoformat(raw_dt.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                date = raw_dt[:16]
+
+            label = acc.get("label", email)
+            code  = find_code(body) or find_code(subject)
+            is_html = "<" in body and ">" in body
+
+            # 标已读
+            try:
+                httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg_id}",
+                            json={"isRead": True},
+                            headers={"Authorization": f"Bearer {token}"}, timeout=3)
+            except Exception:
+                pass
+
+            if code or FORWARD_ALL:
+                if code:
+                    text = (f"`{code}`\n\n📬 *{label}*\n"
+                            f"发件人: {sender}\n时间: {date}\n主题: {subject}")
+                    log.info(f"[Outlook Push:{label}] 验证码: {code}")
+                    send_tg(text)
+                    if FORWARD_ALL and is_html:
+                        send_tg_document(f"📎 {subject[:60]}", f"{subject[:40]}.html", body)
+                elif FORWARD_ALL:
+                    plain = html_to_text(body)
+                    caption = f"📩 *{label}*\n发件人: {sender}\n时间: {date}\n主题: {subject}"
+                    if plain and len(plain) >= 50:
+                        send_tg(caption + f"\n\n{plain[:1500]}")
+                    else:
+                        send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                    if is_html:
+                        send_tg_document(caption, f"{subject[:40]}.html", body)
+    except Exception as e:
+        log.error(f"[Outlook Push] 处理通知异常: {e}")
+
+def _renew_outlook_subscriptions():
+    """每 2.5 天自动续期所有 Outlook 订阅"""
+    while True:
+        time.sleep(int(2.5 * 24 * 3600))
+        for acc in _outlook_accounts:
+            _outlook_subscribe(acc)
+
+_outlook_accounts: list[dict] = []  # 启动时填充
+
 # ── Gmail Push OAuth ──────────────────────────────────────────────────────────
 _gmail_tokens: dict[str, dict] = {}  # email -> {access_token, refresh_token, expiry, label}
 _gmail_push_lock = threading.Lock()
@@ -349,8 +474,10 @@ _gmail_last_history: dict[str, str] = {}  # email -> last processed historyId
 GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify"
 
 def _gmail_refresh_token(email: str) -> str:
-    t = _gmail_tokens.get(email, {})
-    if t and time.time() < t.get("expiry", 0):
+    t = _gmail_tokens.get(email)
+    if not t:
+        raise RuntimeError(f"Gmail token 不存在: {email}")
+    if time.time() < t.get("expiry", 0) and t.get("access_token"):
         return t["access_token"]
     r = httpx.post(GMAIL_TOKEN_URL, data={
         "client_id": GMAIL_CLIENT_ID,
@@ -532,12 +659,32 @@ class OAuthHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             self._respond(200, "ok")
-            log.info(f"[Gmail Push] 收到推送: {body[:200]}")
             try:
                 data = json.loads(body)
                 threading.Thread(target=_process_gmail_push, args=(data,), daemon=True).start()
             except Exception as e:
                 log.error(f"[Gmail Push] 解析推送失败: {e}")
+
+        elif parsed.path == "/api/outlook/push":
+            params = parse_qs(parsed.query)
+            # Microsoft 验证握手
+            validation_token = params.get("validationToken", [None])[0]
+            if validation_token:
+                body_bytes = validation_token.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", len(body_bytes))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+                return
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            self._respond(202, "")
+            try:
+                data = json.loads(body)
+                threading.Thread(target=_process_outlook_push, args=(data,), daemon=True).start()
+            except Exception as e:
+                log.error(f"[Outlook Push] 解析推送失败: {e}")
         else:
             self._respond(404, "Not Found")
 
@@ -811,6 +958,15 @@ def main():
                 }
                 _gmail_watch(email)
         threading.Thread(target=_renew_gmail_watches, daemon=True).start()
+
+    # 注册 Outlook Change Notifications
+    if OAUTH_ENABLED:
+        outlook_accs = [a for a in accounts if a.get("type") == "outlook" and a.get("refresh_token")]
+        _outlook_accounts.extend(outlook_accs)
+        for acc in outlook_accs:
+            threading.Thread(target=_outlook_subscribe, args=(acc,), daemon=True).start()
+        if outlook_accs:
+            threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
     first_run = True
     while True:
