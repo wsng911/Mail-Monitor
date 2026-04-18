@@ -1085,6 +1085,23 @@ def main():
         if outlook_accs:
             threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
+    # 判断是否有需要轮询的账号
+    def _needs_poll(acc):
+        t = acc.get("type", "").lower()
+        if t == "gmail" and acc.get("gmail_refresh_token") and GMAIL_PUSH_ENABLED:
+            return False
+        if t == "qq":
+            return False  # QQ 用 IDLE
+        if t == "outlook" and acc.get("email") in _outlook_subscriptions:
+            return False
+        return True
+
+    poll_accounts = [a for a in accounts if _needs_poll(a)]
+    if not poll_accounts:
+        log.info("所有账号已使用 Push/IDLE，轮询循环已跳过")
+        threading.Event().wait()  # 永久阻塞，保持进程运行
+        return
+
     first_run = True
     while True:
         _skip = first_run
@@ -1108,8 +1125,8 @@ def main():
             return []
 
         all_items = []
-        with ThreadPoolExecutor(max_workers=min(len(accounts), 10)) as ex:
-            futures = {ex.submit(poll_one, acc): acc for acc in accounts}
+        with ThreadPoolExecutor(max_workers=min(len(poll_accounts), 10)) as ex:
+            futures = {ex.submit(poll_one, acc): acc for acc in poll_accounts}
             for f in as_completed(futures):
                 all_items.extend(f.result() or [])
 
