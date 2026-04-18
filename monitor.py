@@ -945,9 +945,9 @@ def main():
 
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
     if OAUTH_ENABLED:
-        parts.append(f"➕ [添加 Outlook 账号]({auth_url})")
+        parts.append(f"➕ [Outlook Push 授权]({auth_url})")
     if GMAIL_PUSH_ENABLED:
-        parts.append(f"➕ [添加 Gmail Push]({auth_url.replace('/auth/outlook', '/auth/gmail')})")
+        parts.append(f"➕ [Gmail Push 授权]({auth_url.replace('/auth/outlook', '/auth/gmail')})")
 
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
 
