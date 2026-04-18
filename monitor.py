@@ -219,9 +219,113 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
 def poll_gmail(acc: dict, skip_existing: bool = False) -> list[dict]:
     return _poll_imap(acc, "imap.gmail.com", skip_existing=skip_existing)
 
-# ── QQ 邮箱（授权码）─────────────────────────────────────────────────────────
+# ── QQ 邮箱（授权码 + IMAP IDLE）────────────────────────────────────────────
+_qq_idle_threads: set[str] = set()  # 已启动 IDLE 的账号
+
+def _qq_idle_worker(acc: dict):
+    """QQ IMAP IDLE 长连接，新邮件到达时立即处理"""
+    email = acc["email"]
+    app_pass = acc["app_pass"]
+    label = acc.get("label", email)
+    log.info(f"[QQ IDLE] {email} 启动 IDLE 监听")
+
+    while True:
+        try:
+            imap = imaplib.IMAP4_SSL("imap.qq.com", 993)
+            imap.login(email, app_pass)
+            imap.select("INBOX")
+
+            # 先处理已有未读
+            _, data = imap.search(None, "UNSEEN")
+            for uid in data[0].split():
+                _process_imap_uid(imap, uid, acc, label)
+
+            # 进入 IDLE 循环
+            while True:
+                imap.send(b"IDLE\r\n")
+                imap.readline()  # 等待 "+ idling" 响应
+
+                # 等待服务器推送，最多 9 分钟
+                imap.socket().settimeout(540)
+                try:
+                    line = imap.readline()
+                    if b"EXISTS" in line or b"RECENT" in line:
+                        # 有新邮件，退出 IDLE 取邮件
+                        imap.send(b"DONE\r\n")
+                        imap.readline()
+                        _, data = imap.search(None, "UNSEEN")
+                        for uid in data[0].split():
+                            _process_imap_uid(imap, uid, acc, label)
+                    else:
+                        imap.send(b"DONE\r\n")
+                        imap.readline()
+                except Exception:
+                    # 超时或断开，重新 IDLE
+                    try:
+                        imap.send(b"DONE\r\n")
+                        imap.readline()
+                    except Exception:
+                        break
+
+        except Exception as e:
+            log.error(f"[QQ IDLE] {email} 连接断开: {e}")
+            time.sleep(10)  # 断线重连等待
+
+
+def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
+    """处理单封 IMAP 邮件"""
+    try:
+        _, raw = imap.fetch(uid, "(RFC822)")
+        if not raw or not raw[0]:
+            return
+        msg = email_lib.message_from_bytes(raw[0][1])
+        subject = decode_subject(msg)
+        body, html_body = extract_imap_body(msg)
+        date = parse_date(msg)
+        to_addr = extract_to_email(msg) or label
+        code = find_code(body) or find_code(subject)
+        imap.store(uid, "+FLAGS", "\\Seen")
+
+        if not (code or FORWARD_ALL):
+            return
+
+        plain = html_to_text(body)
+        is_html = bool(html_body)
+        sender = decode_from(msg)
+
+        if code:
+            text = (f"`{code}`\n\n"
+                    f">{_esc('📬')} *{_esc(to_addr)}*\n"
+                    f">{_esc('发件人')}: {_esc(sender)}\n"
+                    f">{_esc('时间')}: {_esc(date)}\n"
+                    f">{_esc('主题')}: {_esc(subject)}")
+            log.info(f"[QQ IDLE:{to_addr}] 验证码: {code}")
+            send_tg(text)
+            if FORWARD_ALL and is_html:
+                send_tg_document(f"{subject[:40]}.html", html_body)
+        elif FORWARD_ALL:
+            header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
+                      f">{_esc('发件人')}: {_esc(sender)}\n"
+                      f">{_esc('时间')}: {_esc(date)}\n"
+                      f">{_esc('主题')}: {_esc(subject)}")
+            if plain and len(plain) >= 50:
+                send_tg(header + f"\n\n||{_esc(plain[:1500])}||")
+            else:
+                send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
+            if is_html:
+                send_tg_document(f"{subject[:40]}.html", html_body)
+    except Exception as e:
+        log.error(f"[QQ IDLE] 处理邮件失败: {e}")
+
+
 def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
-    return _poll_imap(acc, "imap.qq.com", skip_existing=skip_existing)
+    """QQ 邮箱：首次启动 IDLE 线程，之后不再轮询"""
+    email = acc["email"]
+    if email not in _qq_idle_threads:
+        _qq_idle_threads.add(email)
+        threading.Thread(target=_qq_idle_worker, args=(acc,), daemon=True).start()
+        log.info(f"[QQ IDLE] {email} IDLE 线程已启动")
+    return []  # IDLE 模式不走轮询
 
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
