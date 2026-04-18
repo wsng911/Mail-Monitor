@@ -96,14 +96,21 @@ def _esc(text: str) -> str:
     return text
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
-def send_tg(text: str):
+def send_tg(text: str) -> bool:
     try:
         r = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
                        json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "MarkdownV2"}, timeout=10)
-        if r.status_code != 200:
-            log.error(f"TG 推送失败: {r.text}")
+        if r.status_code == 200:
+            return True
+        log.error(f"TG 推送失败: {r.text}")
+        # MarkdownV2 解析失败时降级为纯文本重试
+        r2 = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+                        json={"chat_id": TG_CHAT_ID, "text": re.sub(r'[\\`*_\[\]()~>#+=|{}.!\-]', '', text)},
+                        timeout=10)
+        return r2.status_code == 200
     except Exception as e:
         log.error(f"TG 推送异常: {e}")
+        return False
 
 def send_tg_document(filename: str, content: str):
     """发送 HTML 文件附件（无 caption，文字已单独发送）"""
@@ -1236,8 +1243,7 @@ def main():
                         f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
                         f">{_esc('主题')}: {_esc(item['subject'])}")
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
-                send_tg(text)
-                if FORWARD_ALL and is_html and body_raw:
+                if send_tg(text) and FORWARD_ALL and is_html and body_raw:
                     send_tg_document(f"{item['subject'][:40]}.html",
                                      wrap_html(html_body, subject=item['subject'], from_=item['from'],
                                                to=item.get('to', item['label']), date=item.get('date', ''),
@@ -1250,16 +1256,13 @@ def main():
                 log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
                 if plain and len(plain) >= 50:
                     spoiler = f"||{_esc(plain[:1500])}||"
-                    text = header + f"\n\n{spoiler}"
-                    send_tg(text)
-                    if is_html and len(plain) > 1500:
+                    if send_tg(header + f"\n\n{spoiler}") and is_html and len(plain) > 1500:
                         send_tg_document(f"{item['subject'][:40]}.html",
                                          wrap_html(html_body, subject=item['subject'], from_=item['from'],
                                                    to=item.get('to', item['label']), date=item.get('date', ''),
                                                    received=item.get('received', '')))
                 else:
-                    send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
-                    if is_html:
+                    if send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}") and is_html:
                         send_tg_document(f"{item['subject'][:40]}.html",
                                          wrap_html(html_body, subject=item['subject'], from_=item['from'],
                                                    to=item.get('to', item['label']), date=item.get('date', ''),
