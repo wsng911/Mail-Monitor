@@ -988,6 +988,9 @@ def main():
                 elif t == "qq":
                     return poll_qq(acc, skip_existing=skip)
                 elif t == "outlook":
+                    # 已有 Push 订阅的账号跳过轮询
+                    if acc.get("email") in _outlook_subscriptions:
+                        return []
                     return poll_outlook(acc, skip_existing=skip)
             except Exception as e:
                 log.error(f"[{acc.get('email')}] {e}")
