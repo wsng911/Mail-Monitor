@@ -598,7 +598,11 @@ def _process_outlook_push(data: dict):
             body    = msg.get("body", {}).get("content", "")
             raw_dt  = msg.get("receivedDateTime", "")
             try:
-                date = datetime.fromisoformat(raw_dt.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+                received_dt = datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
+                date = received_dt.astimezone().strftime("%Y-%m-%d %H:%M")
+                # 跳过启动前的历史邮件
+                if received_dt < STARTUP_TIME:
+                    continue
             except Exception:
                 date = raw_dt[:16]
 
