@@ -1209,6 +1209,15 @@ def main():
         if outlook_accs:
             threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
+    # 启动 QQ IDLE 线程
+    for acc in accounts:
+        if acc.get("type", "").lower() == "qq":
+            email = acc["email"]
+            if email not in _qq_idle_threads:
+                _qq_idle_threads.add(email)
+                threading.Thread(target=_qq_idle_worker, args=(acc,), daemon=True).start()
+                log.info(f"[QQ IDLE] {email} IDLE 线程已启动")
+
     # 判断是否有需要轮询的账号
     def _needs_poll(acc):
         t = acc.get("type", "").lower()
