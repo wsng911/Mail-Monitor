@@ -306,8 +306,11 @@ def _qq_idle_worker(acc: dict):
                         break
 
         except Exception as e:
+            err = str(e)
             log.error(f"[QQ IDLE] {email} 连接断开: {e}")
-            time.sleep(10)  # 断线重连等待
+            # 登录失败（授权码错误/账号异常）等待更长时间，避免频繁重试
+            wait = 300 if "Login fail" in err else 15
+            time.sleep(wait)
 
 
 def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
