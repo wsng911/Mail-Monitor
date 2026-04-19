@@ -47,19 +47,43 @@ GLOBAL_MODE = cfg.get("mode", "push").lower()
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
+# 验证码上下文关键词
+_CODE_CONTEXT_RE = re.compile(
+    r'(?:验证码|动态码|校验码|确认码|激活码|authorization code|verification code|'
+    r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code)'
+    r'[\s\S]{0,60}?([A-Z0-9]{4,8})\b',
+    re.IGNORECASE
+)
+# 备用：验证码在冒号/是后面
+_CODE_COLON_RE = re.compile(
+    r'(?:验证码|code|OTP|passcode)[^\w\n]{0,10}([A-Z0-9]{4,8})\b',
+    re.IGNORECASE
+)
 
 def find_code(text: str) -> str | None:
-    for m in CODE_RE.finditer(text or ""):
+    if not text:
+        return None
+    # 优先：上下文匹配
+    for pattern in (_CODE_CONTEXT_RE, _CODE_COLON_RE):
+        for m in pattern.finditer(text):
+            c = m.group(1).upper()
+            if len(set(c)) == 1:  # 排除全同字符
+                continue
+            if c in ("123456", "654321", "000000"):
+                continue
+            return c
+    # 降级：纯6位数字（无上下文，过滤更严格）
+    for m in CODE_RE.finditer(text):
         c = m.group()
-        # 排除全同数字
         if len(set(c)) == 1:
             continue
-        # 排除常见误判
         if c in ("123456", "654321", "000000", "100000", "200000", "300000",
                  "400000", "500000", "600000", "700000", "800000", "900000"):
             continue
-        # 排除末尾4个0（如 120000、250000 等大整数）
         if c.endswith("0000"):
+            continue
+        # 排除年份
+        if c[:4] in ("2024", "2025", "2026", "2023", "2022"):
             continue
         return c
     return None
