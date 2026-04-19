@@ -7,8 +7,8 @@
 | Gmail | IMAP IDLE | ~1-3 秒 | 应用专用密码 |
 | Gmail | Pub/Sub Push | ~1-5 秒 | OAuth2 |
 | QQ邮箱 | IMAP IDLE | ~1-3 秒 | 授权码 |
-| Outlook / Hotmail | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
-| Outlook / Hotmail | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
+| Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
+| Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
 Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
 
@@ -174,7 +174,7 @@ gmail_push:
 
 ---
 
-## Outlook / Hotmail 配置
+## Outlook 配置
 
 ### 方案一：手动获取 refresh_token（简单，Graph API 轮询）
 
