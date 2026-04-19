@@ -266,6 +266,7 @@ def _qq_idle_worker(acc: dict):
     app_pass = acc["app_pass"]
     label = acc.get("label", email)
     log.info(f"[QQ IDLE] {email} 启动 IDLE 监听")
+    _login_fail_alerted = False
 
     while True:
         try:
@@ -308,8 +309,14 @@ def _qq_idle_worker(acc: dict):
         except Exception as e:
             err = str(e)
             log.error(f"[QQ IDLE] {email} 连接断开: {e}")
-            # 登录失败（授权码错误/账号异常）等待更长时间，避免频繁重试
-            wait = 300 if "Login fail" in err else 15
+            if "Login fail" in err:
+                if not _login_fail_alerted:
+                    _login_fail_alerted = True
+                    send_tg(f"⚠️ QQ邮箱账号失效：`{_esc(email)}`\n请重新生成授权码并更新配置")
+                wait = 3600
+            else:
+                _login_fail_alerted = False
+                wait = 15
             time.sleep(wait)
 
 
