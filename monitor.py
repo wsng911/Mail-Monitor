@@ -549,6 +549,13 @@ def _process_outlook_push(data: dict):
             email = notification.get("clientState", "")
             resource = notification.get("resourceData", {})
             msg_id = resource.get("id", "")
+            # resourceData 可能为空，从 resource 字段解析消息 ID
+            if not msg_id:
+                res_path = notification.get("resource", "")
+                # 格式: me/messages('AAMk...') 或 me/mailFolders('Inbox')/messages('AAMk...')
+                m = re.search(r"messages\('([^']+)'\)", res_path)
+                if m:
+                    msg_id = m.group(1)
             if not email or not msg_id or msg_id in _processed_msg_ids:
                 continue
             _processed_msg_ids.add(msg_id)
