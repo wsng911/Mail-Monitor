@@ -91,7 +91,13 @@ def html_to_text(raw: str) -> str:
     except Exception:
         return re.sub(r'<[^>]+>', '', html.unescape(raw)).strip()
 
-def _esc(text: str) -> str:
+def _safe_filename(subject: str, max_len: int = 30) -> str:
+    """把主题转成安全的文件名，限制长度避免截断乱码"""
+    name = re.sub(r'[\\/:*?"<>|]', '_', subject).strip()
+    # 按字符截断，避免中文截断乱码
+    if len(name) > max_len:
+        name = name[:max_len].rstrip()
+    return name or "邮件"
     """MarkdownV2 特殊字符转义"""
     for c in r'\_*[]()~`>#+-=|{}.!':
         text = text.replace(c, f'\\{c}')
@@ -332,7 +338,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                     f">{_esc('主题')}: {_esc(subject)}")
             log.info(f"[QQ IDLE:{to_addr}] 验证码: {code}")
             if send_tg(text) and FORWARD_ALL:
-                send_tg_document(f"{subject[:40]}.html",
+                send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
         elif FORWARD_ALL:
             header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
@@ -341,7 +347,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                       f">{_esc('主题')}: {_esc(subject)}")
             log.info(f"[QQ IDLE:{to_addr}] 转发邮件: {subject}")
             if send_tg(header):
-                send_tg_document(f"{subject[:40]}.html",
+                send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
     except Exception as e:
         log.error(f"[QQ IDLE] 处理邮件失败: {e}")
@@ -597,7 +603,7 @@ def _process_outlook_push(data: dict):
                             f">{_esc('主题')}: {_esc(subject)}")
                     log.info(f"[Outlook Push:{label}] 验证码: {code}")
                     if send_tg(text) and FORWARD_ALL:
-                        send_tg_document(f"{subject[:40]}.html",
+                        send_tg_document(f"{_safe_filename(subject)}.html",
                                          wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
                 elif FORWARD_ALL:
                     header = (f">{_esc('📩')} *{_esc(label)}*\n"
@@ -606,7 +612,7 @@ def _process_outlook_push(data: dict):
                               f">{_esc('主题')}: {_esc(subject)}")
                     log.info(f"[Outlook Push:{label}] 转发邮件: {subject}")
                     if send_tg(header):
-                        send_tg_document(f"{subject[:40]}.html",
+                        send_tg_document(f"{_safe_filename(subject)}.html",
                                          wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
@@ -780,7 +786,7 @@ def _process_gmail_push(data: dict):
                                 f">{_esc('主题')}: {_esc(item['subject'])}")
                         log.info(f"[Gmail Push:{label}] 验证码: {code}")
                         if send_tg(text) and FORWARD_ALL:
-                            send_tg_document(f"{item['subject'][:40]}.html",
+                            send_tg_document(f"{_safe_filename(item['subject'])}.html",
                                              wrap_html(attach_html, subject=item['subject'], from_=item['from'],
                                                        to=label, date=item['date']))
                     elif FORWARD_ALL:
@@ -790,7 +796,7 @@ def _process_gmail_push(data: dict):
                                   f">{_esc('主题')}: {_esc(item['subject'])}")
                         log.info(f"[Gmail Push:{label}] 转发邮件: {item['subject']}")
                         if send_tg(header):
-                            send_tg_document(f"{item['subject'][:40]}.html",
+                            send_tg_document(f"{_safe_filename(item['subject'])}.html",
                                              wrap_html(attach_html, subject=item['subject'], from_=item['from'],
                                                        to=label, date=item['date']))
     except Exception as e:
@@ -1253,7 +1259,7 @@ def main():
                         f">{_esc('主题')}: {_esc(item['subject'])}")
 
             def _send_attach(item, content):
-                send_tg_document(f"{item['subject'][:40]}.html",
+                send_tg_document(f"{_safe_filename(item['subject'])}.html",
                                  wrap_html(content, subject=item['subject'], from_=item['from'],
                                            to=item.get('to', item['label']), date=item.get('date', ''),
                                            received=item.get('received', '')))
