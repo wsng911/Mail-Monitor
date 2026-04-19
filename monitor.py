@@ -267,6 +267,7 @@ def _qq_idle_worker(acc: dict):
     label = acc.get("label", email)
     log.info(f"[QQ IDLE] {email} 启动 IDLE 监听")
     _login_fail_alerted = False
+    _seen_uids: set[bytes] = set()  # 本次连接已处理的 UID
 
     while True:
         try:
@@ -277,7 +278,9 @@ def _qq_idle_worker(acc: dict):
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
             for uid in data[0].split():
-                _process_imap_uid(imap, uid, acc, label)
+                if uid not in _seen_uids:
+                    _seen_uids.add(uid)
+                    _process_imap_uid(imap, uid, acc, label)
 
             # 进入 IDLE 循环
             while True:
@@ -294,7 +297,9 @@ def _qq_idle_worker(acc: dict):
                         imap.readline()
                         _, data = imap.search(None, "UNSEEN")
                         for uid in data[0].split():
-                            _process_imap_uid(imap, uid, acc, label)
+                            if uid not in _seen_uids:
+                                _seen_uids.add(uid)
+                                _process_imap_uid(imap, uid, acc, label)
                     else:
                         imap.send(b"DONE\r\n")
                         imap.readline()
