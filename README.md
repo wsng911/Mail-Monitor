@@ -2,11 +2,13 @@
 
 监控 Gmail / QQ邮箱 / Outlook 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
 
-| 邮箱 | 连接方式 | 实时 | 认证方式 |
+| 邮箱 | 获取方式 | 延迟 | 认证方式 |
 |------|---------|:----:|---------|
-| Gmail | IMAP IDLE / Pub/Sub Push | ✅ | 应用专用密码 / OAuth2 |
-| QQ邮箱 | IMAP IDLE | ✅ | 授权码 |
-| Outlook / Hotmail | Change Notifications Push / Graph API 轮询 | ✅ / ⏱ | OAuth2 + Azure 应用 / refresh_token |
+| Gmail | IMAP IDLE | ~1-3 秒 | 应用专用密码 |
+| Gmail | Pub/Sub Push | ~1-5 秒 | OAuth2 |
+| QQ邮箱 | IMAP IDLE | ~1-3 秒 | 授权码 |
+| Outlook / Hotmail | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
+| Outlook / Hotmail | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
 Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
 
