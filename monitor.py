@@ -40,6 +40,11 @@ GMAIL_PUSH_ENABLED  = bool(GMAIL_CLIENT_ID and GMAIL_PUBSUB_TOPIC)
 GMAIL_TOKEN_URL     = "https://oauth2.googleapis.com/token"
 GMAIL_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
 
+# 全局接收模式：push（默认）或 idle
+# push  → Gmail/Outlook 优先使用 Push，缺少配置时 Telegram 警告并降级
+# idle  → 强制 IMAP IDLE / Graph API 轮询，不启动任何 Push
+GLOBAL_MODE = cfg.get("mode", "push").lower()
+
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
 
@@ -542,7 +547,7 @@ def _outlook_subscribe(acc: dict):
             json={
                 "changeType": "created",
                 "notificationUrl": OUTLOOK_PUSH_CALLBACK,
-                "resource": "me/mailFolders('Inbox')/messages",
+                "resource": "me/messages",
                 "expirationDateTime": expiry,
                 "clientState": email,
             },
@@ -798,6 +803,13 @@ def _process_gmail_push(data: dict):
                 item = _gmail_fetch_message(email, msg_id)
                 if not item:
                     continue
+                # 跳过启动前的历史邮件
+                try:
+                    item_dt = parsedate_to_datetime(item["date"]).astimezone(timezone.utc).replace(tzinfo=timezone.utc)
+                    if item_dt < STARTUP_TIME:
+                        continue
+                except Exception:
+                    pass
                 body = item["body"]
                 code = find_code(body) or find_code(item["subject"])
                 label = _gmail_tokens.get(email, {}).get("label", email)
@@ -1206,29 +1218,37 @@ def main():
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
 
     # 加载已有 Gmail Push token 并注册 watch
-    if GMAIL_PUSH_ENABLED:
+    if GLOBAL_MODE == "push" and GMAIL_PUSH_ENABLED:
         for acc in accounts:
-            if acc.get("type") == "gmail" and acc.get("gmail_refresh_token"):
+            if acc.get("type") == "gmail":
                 email = acc["email"]
-                _gmail_tokens[email] = {
-                    "access_token": "",
-                    "refresh_token": acc["gmail_refresh_token"],
-                    "expiry": 0,
-                    "label": acc.get("label", email),
-                }
-                _gmail_watch(email)
+                if acc.get("gmail_refresh_token"):
+                    _gmail_tokens[email] = {
+                        "access_token": "",
+                        "refresh_token": acc["gmail_refresh_token"],
+                        "expiry": 0,
+                        "label": acc.get("label", email),
+                    }
+                    _gmail_watch(email)
+                else:
+                    send_tg(f"⚠️ Gmail Push 模式：`{_esc(email)}` 缺少 `gmail_refresh_token`，已降级为 IMAP 轮询\n请访问 /auth/gmail 完成授权")
+                    log.warning(f"[Gmail] {email} 缺少 gmail_refresh_token，降级为 IMAP 轮询")
         threading.Thread(target=_renew_gmail_watches, daemon=True).start()
 
-    # 注册 Outlook Change Notifications
-    if OAUTH_ENABLED:
-        outlook_accs = [a for a in accounts if a.get("type") == "outlook" and a.get("refresh_token")]
-        _outlook_accounts.extend(outlook_accs)
-        for acc in outlook_accs:
-            threading.Thread(target=_outlook_subscribe, args=(acc,), daemon=True).start()
-        if outlook_accs:
+    # 注册 Outlook Change Notifications（同步执行，避免与轮询并发）
+    if GLOBAL_MODE == "push" and OAUTH_ENABLED:
+        outlook_push_accs = [a for a in accounts if a.get("type") == "outlook" and a.get("refresh_token")]
+        # 检查缺少 refresh_token 的 Outlook 账号
+        for acc in [a for a in accounts if a.get("type") == "outlook" and not a.get("refresh_token")]:
+            send_tg(f"⚠️ Outlook Push 模式：`{_esc(acc['email'])}` 缺少 `refresh_token`，已降级为 Graph API 轮询\n请访问 /auth/outlook 完成授权")
+            log.warning(f"[Outlook] {acc['email']} 缺少 refresh_token，降级为 Graph API 轮询")
+        _outlook_accounts.extend(outlook_push_accs)
+        for acc in outlook_push_accs:
+            _outlook_subscribe(acc)  # 同步执行，确保订阅完成后再计算 poll_accounts
+        if outlook_push_accs:
             threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
-    # 启动 QQ IDLE 线程
+    # 启动 QQ IDLE 线程（QQ 只支持 IDLE，不受 GLOBAL_MODE 影响）
     for acc in accounts:
         if acc.get("type", "").lower() == "qq":
             email = acc["email"]
@@ -1240,12 +1260,15 @@ def main():
     # 判断是否有需要轮询的账号
     def _needs_poll(acc):
         t = acc.get("type", "").lower()
-        if t == "gmail" and acc.get("gmail_refresh_token") and GMAIL_PUSH_ENABLED:
-            return False
         if t == "qq":
-            return False  # QQ 用 IDLE
-        if t == "outlook" and acc.get("email") in _outlook_subscriptions:
-            return False
+            return False  # QQ 只用 IDLE
+        if GLOBAL_MODE == "idle":
+            return True   # 强制 idle 模式，全部走轮询
+        # push 模式下：已成功订阅/注册 watch 的账号不需要轮询
+        if t == "gmail":
+            return acc["email"] not in _gmail_tokens  # 没有 token = 未完成 Push 授权，走轮询
+        if t == "outlook":
+            return acc.get("email") not in _outlook_subscriptions  # 订阅失败时降级轮询
         return True
 
     poll_accounts = [a for a in accounts if _needs_poll(a)]
@@ -1261,15 +1284,13 @@ def main():
             t = acc.get("type", "").lower()
             try:
                 if t == "gmail":
-                    # 已启用 Push 的账号跳过 IMAP 轮询
-                    if acc.get("gmail_refresh_token") and GMAIL_PUSH_ENABLED:
+                    if GLOBAL_MODE == "push" and acc["email"] in _gmail_tokens:
                         return []
                     return poll_gmail(acc, skip_existing=skip)
                 elif t == "qq":
                     return poll_qq(acc, skip_existing=skip)
                 elif t == "outlook":
-                    # 已有 Push 订阅的账号跳过轮询
-                    if acc.get("email") in _outlook_subscriptions:
+                    if GLOBAL_MODE == "push" and acc.get("email") in _outlook_subscriptions:
                         return []
                     return poll_outlook(acc, skip_existing=skip)
             except Exception as e:

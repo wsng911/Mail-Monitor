@@ -1,6 +1,6 @@
 services:
   mail-monitor:
-    image: wsng911/mail-code-monitor:Mail-code-to-TG
+    image: wsng911/mail-monitor:latest
     container_name: mail-monitor
     restart: unless-stopped
     environment:
