@@ -245,6 +245,14 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
             if skip_existing:
                 imap.store(uid, "+FLAGS", "\\Seen")
                 continue
+            # 跳过启动前的历史邮件
+            try:
+                msg_dt = parsedate_to_datetime(msg.get("Date", "")).astimezone(timezone.utc).replace(tzinfo=timezone.utc)
+                if msg_dt < STARTUP_TIME:
+                    imap.store(uid, "+FLAGS", "\\Seen")
+                    continue
+            except Exception:
+                pass
             to_addr = extract_to_email(msg) or acc.get("label", acc["email"])
             if code or FORWARD_ALL:
                 results.append({"label": to_addr, "subject": subject,
@@ -343,6 +351,14 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         to_addr = extract_to_email(msg) or label
         code = find_code(body) or find_code(subject)
         imap.store(uid, "+FLAGS", "\\Seen")
+
+        # 跳过启动前的历史邮件
+        try:
+            msg_dt = parsedate_to_datetime(msg.get("Date", "")).astimezone(timezone.utc).replace(tzinfo=timezone.utc)
+            if msg_dt < STARTUP_TIME:
+                return
+        except Exception:
+            pass
 
         if not (code or FORWARD_ALL):
             return
