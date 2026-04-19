@@ -474,8 +474,8 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
             _processed_msg_ids.add(msg_id)
             continue
         code    = find_code(body) or find_code(subject)
-        to_addr = next((r["emailAddress"]["address"] for r in msg.get("toRecipients", [])
-                        if r.get("emailAddress", {}).get("address")), label)
+        to_addr = next((rc["emailAddress"]["address"] for rc in msg.get("toRecipients", [])
+                        if rc.get("emailAddress", {}).get("address")), label)
         if not skip_existing and (code or FORWARD_ALL):
             results.append({"label": to_addr, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
         try:
@@ -508,6 +508,14 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
                 if skip_existing:
                     imap.store(uid, "+FLAGS", "\\Seen")
                     continue
+                # 跳过启动前的历史邮件
+                try:
+                    msg_dt = parsedate_to_datetime(msg.get("Date", "")).astimezone(timezone.utc).replace(tzinfo=timezone.utc)
+                    if msg_dt < STARTUP_TIME:
+                        imap.store(uid, "+FLAGS", "\\Seen")
+                        continue
+                except Exception:
+                    pass
                 if code or FORWARD_ALL:
                     results.append({"label": label, "subject": subject,
                                     "from": decode_from(msg), "code": code, "body": body,
@@ -595,9 +603,6 @@ def _process_outlook_push(data: dict):
             if r.status_code != 200:
                 continue
             msg = r.json()
-            if msg.get("isRead"):
-                continue
-
             subject = msg.get("subject", "")
             sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
             body    = msg.get("body", {}).get("content", "")
@@ -789,11 +794,13 @@ def _process_gmail_push(data: dict):
             timeout=10
         )
         if r.status_code != 200:
-            _gmail_last_history[email] = history_id
+            with _gmail_push_lock:
+                _gmail_last_history[email] = history_id
             return
         history_data = r.json()
         # 更新 historyId
-        _gmail_last_history[email] = history_data.get("historyId", history_id)
+        with _gmail_push_lock:
+            _gmail_last_history[email] = history_data.get("historyId", history_id)
         for record in history_data.get("history", []):
             for added in record.get("messagesAdded", []):
                 msg_id = added["message"]["id"]
