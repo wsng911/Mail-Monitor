@@ -10,7 +10,7 @@
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.2.1`
 
 ---
 
@@ -52,6 +52,11 @@ telegram:
 
 poll_interval: 30       # 轮询间隔（秒），Push/IDLE 账号不受此影响
 forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
+
+# 全局接收模式（仅影响 Gmail 和 Outlook，QQ 永远使用 IDLE）
+# push：优先使用 Push，账号缺少授权时发 Telegram 警告并降级
+# idle：强制 IMAP IDLE / Graph API 轮询，不启动任何 Push
+mode: push
 
 # Outlook OAuth 回调服务（用于一键授权 + Change Notifications Push）
 oauth:
@@ -266,6 +271,13 @@ oauth:
 ---
 
 ## 常见问题
+
+**Q: Gmail token 失效 / invalid_grant**
+- refresh_token 已过期或被撤销（改密码、手动撤权、超过50个授权均会导致失效）
+- 程序会自动发 Telegram 警告，访问 `/auth/gmail` 重新授权即可
+
+**Q: 如何强制所有账号走 IMAP 轮询，不用 Push**
+- 在 config.yaml 顶层设置 `mode: idle`
 
 **Q: Gmail 登录失败**
 - 使用应用专用密码，不是 Gmail 登录密码；确认 IMAP 已开启，两步验证已启用

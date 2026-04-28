@@ -5,6 +5,12 @@ telegram:
 # true = 转发所有邮件（含 HTML 附件）；false = 只推验证码
 forward_all: false
 
+# ── 全局接收模式（仅影响 Gmail 和 Outlook，QQ 永远使用 IDLE）────────────────
+# push：优先使用 Push（Gmail Pub/Sub / Outlook Change Notifications）
+#        账号缺少 Push 所需配置时会发 Telegram 警告，并降级到 idle/poll
+# idle：强制使用 IMAP IDLE / Graph API 轮询，不启动任何 Push
+mode: push
+
 accounts:
   # ── Gmail（应用专用密码）──────────────────────────────────────────────────
   # 需要：开启两步验证 + 生成应用专用密码 + 开启 IMAP
@@ -14,6 +20,7 @@ accounts:
       - label: 我的Gmail
         email: you@gmail.com
         app_pass: "xxxx xxxx xxxx xxxx"   # 16位应用专用密码
+        gmail_refresh_token: ""           # Gmail Push 授权后自动填入
 
   # ── QQ邮箱（授权码）──────────────────────────────────────────────────────
   # 需要：开启 IMAP 服务 + 生成授权码

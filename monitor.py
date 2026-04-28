@@ -426,6 +426,7 @@ def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
 _token_fail_alerted: set[str] = set()  # 已推送过失效通知的账号
+_gmail_fail_alerted: set[str] = set()  # Gmail token 失效已通知的账号
 _processed_msg_ids: set[str] = set()  # 已处理的 Graph message id
 
 def _outlook_refresh(acc: dict) -> dict:
@@ -724,7 +725,13 @@ def _gmail_refresh_token(email: str) -> str:
     }, timeout=10)
     d = r.json()
     if "access_token" not in d:
+        err = d.get("error", "")
+        if err == "invalid_grant" and email not in _gmail_fail_alerted:
+            _gmail_fail_alerted.add(email)
+            auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/gmail")
+            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{auth_url}")
         raise RuntimeError(f"Gmail token 刷新失败: {email} {d}")
+    _gmail_fail_alerted.discard(email)  # 刷新成功，清除失效记录
     _gmail_tokens[email]["access_token"] = d["access_token"]
     _gmail_tokens[email]["expiry"] = time.time() + d.get("expires_in", 3600) - 60
     return d["access_token"]
@@ -1113,35 +1120,45 @@ def _save_gmail_token(email: str, refresh_token: str):
     with open(CONFIG_FILE) as f:
         lines = f.readlines()
 
+    # 先尝试直接替换已有的 gmail_refresh_token 行（在对应 email 块内）
+    in_block = False
     new_lines = []
-    i = 0
+    replaced = False
+    for line in lines:
+        if re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
+            in_block = True
+        elif in_block and re.match(r'\s*-\s+\w', line) and 'email:' not in line:
+            in_block = False  # 进入下一个 mailbox 块
+        if in_block and not replaced and re.match(r'(\s*)gmail_refresh_token:', line):
+            indent = len(line) - len(line.lstrip())
+            new_lines.append(f'{" " * indent}gmail_refresh_token: "{refresh_token}"\n')
+            replaced = True
+            continue
+        new_lines.append(line)
+
+    if replaced:
+        with open(CONFIG_FILE, "w") as f:
+            f.writelines(new_lines)
+        return
+
+    # 没有找到已有字段，在 email: 行后插入
+    new_lines = []
     inserted = False
-    while i < len(lines):
-        line = lines[i]
+    for line in lines:
         new_lines.append(line)
         if not inserted and re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
             indent = len(line) - len(line.lstrip())
-            spaces = " " * indent
-            if i + 1 < len(lines) and "gmail_refresh_token:" in lines[i + 1]:
-                i += 1
-                new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
-            else:
-                new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
+            new_lines.append(f'{" " * indent}gmail_refresh_token: "{refresh_token}"\n')
             inserted = True
-        i += 1
 
     if not inserted:
-        # 账号不存在，追加到 gmail mailboxes 末尾或新建
         content = "".join(new_lines)
         new_entry = (
             f"      - email: \"{email}\"\n"
             f"        label: \"{email}\"\n"
             f"        gmail_refresh_token: \"{refresh_token}\"\n"
         )
-        if "type: gmail" in content:
-            content = content.rstrip() + "\n" + new_entry
-        else:
-            content = content.rstrip() + "\n  - type: gmail\n    mailboxes:\n" + new_entry
+        content += ("\n  - type: gmail\n    mailboxes:\n" if "type: gmail" not in content else "") + new_entry
         new_lines = [content]
 
     with open(CONFIG_FILE, "w") as f:
