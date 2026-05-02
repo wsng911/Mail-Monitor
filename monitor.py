@@ -1215,8 +1215,15 @@ def main():
     def _make_guide(title: str, sections: list[tuple[str, list[str]]]) -> str:
         """生成 expandable blockquote，超过3行自动折叠，code 可复制"""
         def _line(text: str) -> str:
-            parts_l = re.split(r'(`[^`]*`)', text)
-            return "".join(p if p.startswith("`") else _esc(p) for p in parts_l)
+            # 先拆出 `code` 和 [text](url)，其余部分转义
+            parts_l = re.split(r'(`[^`]*`|\[[^\]]+\]\([^)]+\))', text)
+            result = []
+            for p in parts_l:
+                if p.startswith('`') or (p.startswith('[') and '](' in p):
+                    result.append(p)
+                else:
+                    result.append(_esc(p))
+            return "".join(result)
         lines = [f"*{_esc(title)}*"]
         for sec_title, sec_lines in sections:
             lines.append("")
@@ -1226,35 +1233,28 @@ def main():
         return "**>" + "\n>".join(lines) + "||"
 
     send_tg(_make_guide("📋 Gmail Push 配置备忘", [
-        ("Google Cloud 控制台", [
-            "地址：`console.cloud.google.com`",
+        ("➕ 新增邮箱账号", [
+            "第一步：[GCP 添加测试用户](https://console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615)",
+            "第二步：[Gmail Push 授权](https://oa.idays.gq/auth/gmail)",
+        ]),
+        ("🔧 新建 Pub/Sub（首次或重建）", [
+            "1\\. 打开 [Pub/Sub 主题页](https://console.cloud.google.com/cloudpubsub/topic/list?project=mail-monitor-493615) → 创建主题",
+            "2\\. 主题 ID：`gmail-push`，取消勾选默认订阅 → 创建",
+            "3\\. 进入主题 → 权限 → 添加主账号：`gmail-api-push@system.gserviceaccount.com`，角色：Pub/Sub 发布者",
+            "4\\. 打开 [订阅页](https://console.cloud.google.com/cloudpubsub/subscription/list?project=mail-monitor-493615) → 创建订阅",
+            "5\\. 订阅 ID：`gmail-push-sub`，主题：`gmail-push`，类型：推送",
+            "6\\. 端点：`https://oa.idays.gq/api/gmail/push` → 创建",
+        ]),
+        ("📋 配置信息", [
             "项目：`mail-monitor-493615`",
-        ]),
-        ("Pub/Sub Topic", [
-            "名称：`gmail-push`",
-            "路径：`projects/mail-monitor-493615/topics/gmail-push`",
-            "发布者：`gmail-api-push@system.gserviceaccount.com`",
-        ]),
-        ("Pub/Sub 订阅", [
-            "名称：`gmail-push-sub`",
-            "端点：`https://oa.idays.gq/api/gmail/push`",
-        ]),
-        ("OAuth 客户端", [
-            "ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`",
+            "Topic：`projects/mail-monitor-493615/topics/gmail-push`",
+            "客户端 ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`",
             "回调：`https://oa.idays.gq/api/gmail/oauth/callback`",
         ]),
-        ("Search Console 域名验证", [
-            "验证地址：`https://oa.idays.gq/google883877c5c8e86eea.html`",
-        ]),
         ("重装后操作", [
-            "1. Pub/Sub 订阅无需重建",
-            "2. 域名验证永久有效",
-            "3. 点 Gmail Push 授权链接重新授权各账号",
-            "4. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
-        ]),
-        ("新增账号", [
-            "1. GCP 添加测试用户：`console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615`",
-            "2. 授权入口：`https://oa.idays.gq/auth/gmail`",
+            "1\\. Pub/Sub 订阅无需重建，域名验证永久有效",
+            "2\\. 重新授权各账号：[Gmail Push 授权](https://oa.idays.gq/auth/gmail)",
+            "3\\. 如积压旧消息：[清除消息](https://console.cloud.google.com/cloudpubsub/subscription/detail/gmail-push-sub?project=mail-monitor-493615) → 完全清除",
         ]),
     ]))
 
