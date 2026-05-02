@@ -1252,6 +1252,10 @@ def main():
             "3. 点 Gmail Push 授权链接重新授权各账号",
             "4. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
         ]),
+        ("新增账号", [
+            "1. GCP 添加测试用户：`console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615`",
+            "2. 授权入口：`https://oa.idays.gq/auth/gmail`",
+        ]),
     ]))
 
     send_tg(_make_guide("📋 Outlook Push 配置备忘", [
