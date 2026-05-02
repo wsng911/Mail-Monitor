@@ -47,16 +47,16 @@ GLOBAL_MODE = cfg.get("mode", "push").lower()
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
-# 验证码上下文关键词
+# 验证码上下文关键词（不跨行，捕获组必须含数字）
 _CODE_CONTEXT_RE = re.compile(
     r'(?:验证码|动态码|校验码|确认码|激活码|authorization code|verification code|'
     r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code)'
-    r'[\s\S]{0,60}?([A-Z0-9]{4,8})\b',
+    r'[^\n]{0,60}?(?<!\w)([A-Z]*\d[A-Z0-9]{3,7})\b',
     re.IGNORECASE
 )
-# 备用：验证码在冒号/是后面
+# 备用：验证码在冒号/是后面（不用裸 code 避免匹配 CSS 类名）
 _CODE_COLON_RE = re.compile(
-    r'(?:验证码|code|OTP|passcode)[^\w\n]{0,10}([A-Z0-9]{4,8})\b',
+    r'(?:验证码|动态码|校验码|OTP|passcode|one.time.password)[^\w\n]{0,10}([A-Z0-9]{4,8})\b',
     re.IGNORECASE
 )
 
@@ -95,17 +95,17 @@ class _TextExtractor(HTMLParser):
     def __init__(self):
         super().__init__()
         self._parts = []
-        self._skip = False
+        self._skip_depth = 0  # 用计数器代替布尔，防止嵌套/乱序标签导致状态错乱
     def handle_starttag(self, tag, attrs):
-        if tag in ("style", "script"):
-            self._skip = True
+        if tag in ("style", "script", "head"):
+            self._skip_depth += 1
     def handle_endtag(self, tag):
-        if tag in ("style", "script"):
-            self._skip = False
+        if tag in ("style", "script", "head"):
+            self._skip_depth = max(0, self._skip_depth - 1)
         if tag in ("p", "br", "div", "tr", "li"):
             self._parts.append("\n")
     def handle_data(self, data):
-        if not self._skip:
+        if not self._skip_depth:
             self._parts.append(data)
     def get_text(self):
         lines = "".join(self._parts).splitlines()
