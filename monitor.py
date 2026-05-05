@@ -320,8 +320,11 @@ def _qq_idle_worker(acc: dict):
         try:
             import socket as _socket
             _socket.setdefaulttimeout(30)
+            log.info(f"[QQ IDLE] {email} 正在连接...")
             imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
+            log.info(f"[QQ IDLE] {email} 连接成功，正在登录...")
             imap.login(email, app_pass)
+            log.info(f"[QQ IDLE] {email} 登录成功，选择 INBOX...")
             imap.select("INBOX")
 
             # 先处理已有未读
