@@ -318,7 +318,7 @@ def _qq_idle_worker(acc: dict):
 
     while True:
         try:
-            imap = imaplib.IMAP4_SSL("imap.qq.com", 993)
+            imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
 
