@@ -318,6 +318,8 @@ def _qq_idle_worker(acc: dict):
 
     while True:
         try:
+            import socket as _socket
+            _socket.setdefaulttimeout(30)
             imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
