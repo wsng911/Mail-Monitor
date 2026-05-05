@@ -481,9 +481,12 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
     """acc: {email, refresh_token, client_id(可选), label(可选)}"""
     results = []
     email = acc["email"]
+    # 已确认失效的账号跳过轮询，避免日志刷屏
+    if email in _token_fail_alerted:
+        return results
     try:
         token, token_type = _outlook_get_token(acc)
-        _token_fail_alerted.discard(email)  # 恢复正常时清除记录
+        _token_fail_alerted.discard(email)
         label = acc.get("label", email)
         if token_type == "imap":
             results = _outlook_imap(acc, token, label, skip_existing=skip_existing)
@@ -493,7 +496,7 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
         log.error(f"[Outlook:{email}] {e}")
         if email not in _token_fail_alerted:
             _token_fail_alerted.add(email)
-            send_tg(f"⚠️ Outlook 账号失效：`{email}`\n请重新授权：https://oa.idays.gq/auth/outlook")
+            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：https://oa\\.idays\\.gq/auth/outlook")
     return results
 
 def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
@@ -744,7 +747,7 @@ def _gmail_refresh_token(email: str) -> str:
         if err == "invalid_grant" and email not in _gmail_fail_alerted:
             _gmail_fail_alerted.add(email)
             auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/gmail")
-            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{auth_url}")
+            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{_esc(auth_url)}")
         raise RuntimeError(f"Gmail token 刷新失败: {email} {d}")
     _gmail_fail_alerted.discard(email)  # 刷新成功，清除失效记录
     _gmail_tokens[email]["access_token"] = d["access_token"]
