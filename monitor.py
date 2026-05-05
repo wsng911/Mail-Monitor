@@ -47,16 +47,20 @@ GLOBAL_MODE = cfg.get("mode", "push").lower()
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
-# 验证码上下文关键词（不跨行，捕获组必须含数字）
+# GitHub 格式：XXXX-XXXX（字母数字，带连字符）
+_CODE_HYPHEN_RE = re.compile(r'\b([A-Z0-9]{4}-[A-Z0-9]{4})\b', re.IGNORECASE)
+# 验证码上下文关键词（不跨行，捕获组必须含数字，支持带连字符格式）
 _CODE_CONTEXT_RE = re.compile(
     r'(?:验证码|动态码|校验码|确认码|激活码|authorization code|verification code|'
-    r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code)'
-    r'[^\n]{0,60}?(?<!\w)([A-Z]*\d[A-Z0-9]{3,7})\b',
+    r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code|'
+    r'authentication code|auth(?:entication)?\s+code|sign.in code)'
+    r'[^\n]{0,60}?(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]*\d[A-Z0-9]{3,7})\b',
     re.IGNORECASE
 )
 # 备用：验证码在冒号/是后面（不用裸 code 避免匹配 CSS 类名）
 _CODE_COLON_RE = re.compile(
-    r'(?:验证码|动态码|校验码|OTP|passcode|one.time.password)[^\w\n]{0,10}([A-Z0-9]{4,8})\b',
+    r'(?:验证码|动态码|校验码|OTP|passcode|one.time.password)[^\w\n]{0,10}'
+    r'([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z0-9]{4,8})\b',
     re.IGNORECASE
 )
 
@@ -67,12 +71,18 @@ def find_code(text: str) -> str | None:
     for pattern in (_CODE_CONTEXT_RE, _CODE_COLON_RE):
         for m in pattern.finditer(text):
             c = m.group(1).upper()
-            if len(set(c)) == 1:  # 排除全同字符
+            if len(set(c.replace('-', ''))) == 1:  # 排除全同字符
                 continue
             if c in ("123456", "654321", "000000"):
                 continue
             return c
-    # 降级：纯6位数字（无上下文，过滤更严格）
+    # 降级1：XXXX-XXXX 格式（GitHub 无上下文时）
+    for m in _CODE_HYPHEN_RE.finditer(text):
+        c = m.group(1).upper()
+        if len(set(c.replace('-', ''))) == 1:
+            continue
+        return c
+    # 降级2：纯6位数字（无上下文，过滤更严格）
     for m in CODE_RE.finditer(text):
         c = m.group()
         if len(set(c)) == 1:
