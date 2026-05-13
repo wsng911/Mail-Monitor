@@ -47,16 +47,20 @@ GLOBAL_MODE = cfg.get("mode", "push").lower()
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
-# 验证码上下文关键词（不跨行，捕获组必须含数字）
+# GitHub 格式：XXXX-XXXX（字母数字，带连字符）
+_CODE_HYPHEN_RE = re.compile(r'\b([A-Z0-9]{4}-[A-Z0-9]{4})\b', re.IGNORECASE)
+# 验证码上下文关键词（不跨行，捕获组必须含数字，支持带连字符格式）
 _CODE_CONTEXT_RE = re.compile(
     r'(?:验证码|动态码|校验码|确认码|激活码|authorization code|verification code|'
-    r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code)'
-    r'[^\n]{0,60}?(?<!\w)([A-Z]*\d[A-Z0-9]{3,7})\b',
+    r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code|'
+    r'authentication code|auth(?:entication)?\s+code|sign.in code)'
+    r'[^\n]{0,60}?(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]*\d[A-Z0-9]{3,7})\b',
     re.IGNORECASE
 )
 # 备用：验证码在冒号/是后面（不用裸 code 避免匹配 CSS 类名）
 _CODE_COLON_RE = re.compile(
-    r'(?:验证码|动态码|校验码|OTP|passcode|one.time.password)[^\w\n]{0,10}([A-Z0-9]{4,8})\b',
+    r'(?:验证码|动态码|校验码|OTP|passcode|one.time.password)[^\w\n]{0,10}'
+    r'([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z0-9]{4,8})\b',
     re.IGNORECASE
 )
 
@@ -67,7 +71,7 @@ def find_code(text: str) -> str | None:
     for pattern in (_CODE_CONTEXT_RE, _CODE_COLON_RE):
         for m in pattern.finditer(text):
             c = m.group(1).upper()
-            if len(set(c)) == 1:  # 排除全同字符
+            if len(set(c.replace('-', ''))) == 1:  # 排除全同字符
                 continue
             if c in ("123456", "654321", "000000"):
                 continue
@@ -76,7 +80,13 @@ def find_code(text: str) -> str | None:
             if not c.isdigit() and digits <= len(c) / 2:
                 continue
             return c
-    # 降级：纯6位数字（无上下文，过滤更严格）
+    # 降级1：XXXX-XXXX 格式（GitHub 无上下文时）
+    for m in _CODE_HYPHEN_RE.finditer(text):
+        c = m.group(1).upper()
+        if len(set(c.replace('-', ''))) == 1:
+            continue
+        return c
+    # 降级2：纯6位数字（无上下文，过滤更严格）
     for m in CODE_RE.finditer(text):
         c = m.group()
         if len(set(c)) == 1:
@@ -322,7 +332,9 @@ def _qq_idle_worker(acc: dict):
 
     while True:
         try:
-            imap = imaplib.IMAP4_SSL("imap.qq.com", 993)
+            import socket as _socket
+            _socket.setdefaulttimeout(30)
+            imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
 
@@ -480,9 +492,12 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
     """acc: {email, refresh_token, client_id(可选), label(可选)}"""
     results = []
     email = acc["email"]
+    # 已确认失效的账号跳过轮询，避免日志刷屏
+    if email in _token_fail_alerted:
+        return results
     try:
         token, token_type = _outlook_get_token(acc)
-        _token_fail_alerted.discard(email)  # 恢复正常时清除记录
+        _token_fail_alerted.discard(email)
         label = acc.get("label", email)
         if token_type == "imap":
             results = _outlook_imap(acc, token, label, skip_existing=skip_existing)
@@ -492,7 +507,7 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
         log.error(f"[Outlook:{email}] {e}")
         if email not in _token_fail_alerted:
             _token_fail_alerted.add(email)
-            send_tg(f"⚠️ Outlook 账号失效：`{email}`\n请重新授权：https://oa.idays.gq/auth/outlook")
+            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：https://oa\\.idays\\.gq/auth/outlook")
     return results
 
 def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
@@ -743,7 +758,7 @@ def _gmail_refresh_token(email: str) -> str:
         if err == "invalid_grant" and email not in _gmail_fail_alerted:
             _gmail_fail_alerted.add(email)
             auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/gmail")
-            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{auth_url}")
+            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{_esc(auth_url)}")
         raise RuntimeError(f"Gmail token 刷新失败: {email} {d}")
     _gmail_fail_alerted.discard(email)  # 刷新成功，清除失效记录
     _gmail_tokens[email]["access_token"] = d["access_token"]
