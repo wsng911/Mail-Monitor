@@ -10,7 +10,7 @@
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.2.1`
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.3`
 
 ---
 
