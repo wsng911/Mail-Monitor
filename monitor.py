@@ -71,6 +71,10 @@ def find_code(text: str) -> str | None:
                 continue
             if c in ("123456", "654321", "000000"):
                 continue
+            # 字母数字混合时，数字必须严格超过一半（排除订单号、账号ID等）
+            digits = sum(ch.isdigit() for ch in c)
+            if not c.isdigit() and digits <= len(c) / 2:
+                continue
             return c
     # 降级：纯6位数字（无上下文，过滤更严格）
     for m in CODE_RE.finditer(text):
@@ -109,7 +113,17 @@ class _TextExtractor(HTMLParser):
             self._parts.append(data)
     def get_text(self):
         lines = "".join(self._parts).splitlines()
-        lines = [l for l in lines if l.strip()]
+        # 过滤空行和 CSS 泄漏
+        _css_kv_re = re.compile(r'^[A-Za-z\-]+\s*:\s*\S')   # "color: red"
+        _css_prop_re = re.compile(                            # 孤立 CSS 属性名
+            r'^(?:font|color|background|margin|padding|border|display|width|height|'
+            r'text|line|letter|vertical|white|overflow|position|float|clear|'
+            r'visibility|opacity|cursor|list|table|content|flex|grid|align|justify)'
+            r'(?:-[a-z]+)*\s*$', re.IGNORECASE
+        )
+        lines = [l for l in lines if l.strip()
+                 and not _css_kv_re.match(l.strip())
+                 and not _css_prop_re.match(l.strip())]
         return re.sub(r'\n{3,}', '\n\n', "\n".join(lines)).strip()
 
 def html_to_text(raw: str) -> str:
