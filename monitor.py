@@ -329,6 +329,7 @@ def _qq_idle_worker(acc: dict):
     log.info(f"[QQ IDLE] {email} 启动 IDLE 监听")
     _login_fail_alerted = False
     _seen_uids: set[bytes] = set()  # 本次连接已处理的 UID
+    _consecutive_fails = 0
 
     while True:
         try:
@@ -337,6 +338,7 @@ def _qq_idle_worker(acc: dict):
             imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
+            _consecutive_fails = 0  # 连接成功，重置计数
 
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
@@ -384,7 +386,10 @@ def _qq_idle_worker(acc: dict):
                 wait = 3600
             else:
                 _login_fail_alerted = False
-                wait = 15
+                _consecutive_fails += 1
+                wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)  # 15s, 30s, 60s, 120s, 最大300s
+                if _consecutive_fails == 5:
+                    send_tg(f"⚠️ QQ邮箱连接异常：`{_esc(email)}`\n已连续失败 {_consecutive_fails} 次，等待重连中\n错误：{_esc(err[:80])}")
             time.sleep(wait)
 
 
