@@ -186,6 +186,20 @@ def send_tg_document(filename: str, content: str):
     except Exception as e:
         log.error(f"TG 附件推送异常: {e}")
 
+def send_tg_file(filename: str, data: bytes, content_type: str = "application/octet-stream"):
+    """发送二进制文件附件到 TG"""
+    try:
+        r = httpx.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendDocument",
+            data={"chat_id": TG_CHAT_ID},
+            files={"document": (filename, data, content_type)},
+            timeout=60
+        )
+        if r.status_code != 200:
+            log.error(f"TG 文件推送失败: {r.text[:200]}")
+    except Exception as e:
+        log.error(f"TG 文件推送异常: {e}")
+
 def wrap_html(html_body: str, *, subject: str = "", from_: str = "", to: str = "",
               date: str = "", received: str = "") -> str:
     """在 HTML 邮件顶部注入邮件头信息"""
@@ -224,6 +238,33 @@ def extract_imap_body(msg) -> tuple[str, str]:
     if "html" in ct:
         return decoded, decoded
     return decoded, ""
+
+def extract_attachments(msg) -> list[dict]:
+    """提取邮件附件，返回 [{filename, content_type, data}]"""
+    attachments = []
+    if not msg.is_multipart():
+        return attachments
+    for part in msg.walk():
+        cd = part.get("Content-Disposition", "")
+        if "attachment" not in cd and "inline" not in cd:
+            continue
+        filename = part.get_filename()
+        if not filename:
+            continue
+        # 解码文件名
+        decoded_parts = decode_header(filename)
+        filename = "".join(
+            p.decode(enc or "utf-8") if isinstance(p, bytes) else p
+            for p, enc in decoded_parts
+        )
+        data = part.get_payload(decode=True)
+        if data:
+            attachments.append({
+                "filename": filename,
+                "content_type": part.get_content_type(),
+                "data": data,
+            })
+    return attachments
 
 def decode_subject(msg) -> str:
     raw, enc = decode_header(msg.get("Subject", ""))[0]
@@ -409,6 +450,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         msg = email_lib.message_from_bytes(raw[0][1])
         subject = decode_subject(msg)
         body, html_body = extract_imap_body(msg)
+        attachments = extract_attachments(msg)
         date = parse_date(msg)
         to_addr = extract_to_email(msg) or label
         code = find_code(body) or find_code(subject)
@@ -427,7 +469,17 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
 
         plain = html_to_text(body)
         sender = decode_from(msg)
-        attach_html = html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
+
+        # 在 HTML 末尾追加附件列表
+        att_html = ""
+        if attachments:
+            att_html = "<hr><div style='font-size:13px;color:#555;padding:8px 0'><b>📎 附件：</b><ul>"
+            for att in attachments:
+                size_kb = len(att["data"]) / 1024
+                att_html += f"<li>{html.escape(att['filename'])} ({size_kb:.0f} KB)</li>"
+            att_html += "</ul></div>"
+
+        attach_html = (html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>") + att_html
 
         if code:
             text = (f"`{code}`\n\n"
@@ -439,6 +491,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             if send_tg(text) and FORWARD_ALL:
                 send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
+                for att in attachments:
+                    send_tg_file(att["filename"], att["data"], att["content_type"])
         elif FORWARD_ALL:
             header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
@@ -448,6 +502,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             if send_tg(header):
                 send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
+                for att in attachments:
+                    send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[QQ IDLE] 处理邮件失败: {e}")
 
@@ -713,6 +769,30 @@ def _process_outlook_push(data: dict):
             plain = html_to_text(body)
             attach_html = body if is_html else f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
 
+            # 获取附件
+            attachments = []
+            try:
+                att_r = httpx.get(f"https://graph.microsoft.com/v1.0/me/messages/{msg_id}/attachments",
+                                  headers={"Authorization": f"Bearer {token}"}, timeout=15)
+                if att_r.status_code == 200:
+                    for att in att_r.json().get("value", []):
+                        if att.get("@odata.type") != "#microsoft.graph.fileAttachment":
+                            continue
+                        att_data = base64.b64decode(att.get("contentBytes", ""))
+                        if att_data:
+                            attachments.append({"filename": att.get("name", "attachment"),
+                                                "content_type": att.get("contentType", "application/octet-stream"),
+                                                "data": att_data})
+            except Exception:
+                pass
+
+            if attachments:
+                att_section = "<hr><div style='font-size:13px;color:#555;padding:8px 0'><b>📎 附件：</b><ul>"
+                for att in attachments:
+                    att_section += f"<li>{html.escape(att['filename'])} ({len(att['data'])/1024:.0f} KB)</li>"
+                att_section += "</ul></div>"
+                attach_html += att_section
+
             if code or FORWARD_ALL:
                 if code:
                     text = (f"`{_esc(code)}`\n\n"
@@ -724,6 +804,8 @@ def _process_outlook_push(data: dict):
                     if send_tg(text) and FORWARD_ALL:
                         send_tg_document(f"{_safe_filename(subject)}.html",
                                          wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
+                        for att in attachments:
+                            send_tg_file(att["filename"], att["data"], att["content_type"])
                 elif FORWARD_ALL:
                     header = (f">{_esc('📩')} *{_esc(label)}*\n"
                               f">{_esc('发件人')}: {_esc(sender)}\n"
@@ -733,6 +815,8 @@ def _process_outlook_push(data: dict):
                     if send_tg(header):
                         send_tg_document(f"{_safe_filename(subject)}.html",
                                          wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
+                        for att in attachments:
+                            send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
 
@@ -850,6 +934,37 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
 
         body = plain_body or html_body
 
+        # 提取附件
+        attachments = []
+        def extract_att_parts(parts):
+            for p in parts:
+                filename = p.get("filename")
+                if filename and p.get("body", {}).get("attachmentId"):
+                    attachments.append({
+                        "filename": filename,
+                        "content_type": p.get("mimeType", "application/octet-stream"),
+                        "attachment_id": p["body"]["attachmentId"],
+                        "size": p.get("body", {}).get("size", 0),
+                    })
+                if p.get("parts"):
+                    extract_att_parts(p["parts"])
+        if payload.get("parts"):
+            extract_att_parts(payload["parts"])
+
+        # 下载附件数据
+        for att in attachments:
+            try:
+                att_r = httpx.get(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}/attachments/{att['attachment_id']}",
+                    headers={"Authorization": f"Bearer {token}"}, timeout=30)
+                if att_r.status_code == 200:
+                    att["data"] = base64.urlsafe_b64decode(att_r.json().get("data", "") + "==")
+                else:
+                    att["data"] = b""
+            except Exception:
+                att["data"] = b""
+        attachments = [a for a in attachments if a.get("data")]
+
         # 标为已读
         httpx.post(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}/modify",
@@ -857,7 +972,7 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
             json={"removeLabelIds": ["UNREAD"]},
             timeout=5
         )
-        return {"subject": subject, "from": from_, "date": date, "body": body, "html_body": html_body, "email": email}
+        return {"subject": subject, "from": from_, "date": date, "body": body, "html_body": html_body, "email": email, "attachments": attachments}
     except Exception as e:
         log.error(f"[Gmail Push] 获取邮件失败 {email}/{msg_id}: {e}")
         return None
@@ -909,8 +1024,17 @@ def _process_gmail_push(data: dict):
                 code = find_code(body) or find_code(item["subject"])
                 label = _gmail_tokens.get(email, {}).get("label", email)
                 html_body = item.get("html_body", "")
+                attachments = item.get("attachments", [])
                 plain = html_to_text(body)
                 attach_html = html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
+
+                if attachments:
+                    att_section = "<hr><div style='font-size:13px;color:#555;padding:8px 0'><b>📎 附件：</b><ul>"
+                    for att in attachments:
+                        att_section += f"<li>{html.escape(att['filename'])} ({len(att['data'])/1024:.0f} KB)</li>"
+                    att_section += "</ul></div>"
+                    attach_html += att_section
+
                 if code or FORWARD_ALL:
                     if code:
                         text = (f"`{_esc(code)}`\n\n"
@@ -923,6 +1047,8 @@ def _process_gmail_push(data: dict):
                             send_tg_document(f"{_safe_filename(item['subject'])}.html",
                                              wrap_html(attach_html, subject=item['subject'], from_=item['from'],
                                                        to=label, date=item['date']))
+                            for att in attachments:
+                                send_tg_file(att["filename"], att["data"], att["content_type"])
                     elif FORWARD_ALL:
                         header = (f">{_esc('📩')} *{_esc(label)}*\n"
                                   f">{_esc('发件人')}: {_esc(item['from'])}\n"
@@ -933,6 +1059,8 @@ def _process_gmail_push(data: dict):
                             send_tg_document(f"{_safe_filename(item['subject'])}.html",
                                              wrap_html(attach_html, subject=item['subject'], from_=item['from'],
                                                        to=label, date=item['date']))
+                            for att in attachments:
+                                send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
