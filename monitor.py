@@ -381,7 +381,9 @@ def _qq_idle_worker(acc: dict):
         except Exception as e:
             err = str(e)
             if "timed out" in err.lower():
-                log.debug(f"[QQ IDLE] {email} 连接超时，重连中")
+                log.debug(f"[QQ IDLE] {email} IDLE 超时，重新连接")
+                time.sleep(1)
+                continue  # 超时是正常的，立即重连，不计入失败
             else:
                 log.error(f"[QQ IDLE] {email} 连接断开: {e}")
             if "Login fail" in err:
@@ -392,7 +394,7 @@ def _qq_idle_worker(acc: dict):
             else:
                 _login_fail_alerted = False
                 _consecutive_fails += 1
-                wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)  # 15s, 30s, 60s, 120s, 最大300s
+                wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)
                 if _consecutive_fails == 5:
                     send_tg(f"⚠️ QQ邮箱连接异常：`{_esc(email)}`\n已连续失败 {_consecutive_fails} 次，等待重连中\n错误：{_esc(err[:80])}")
             time.sleep(wait)
