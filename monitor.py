@@ -128,17 +128,10 @@ class _TextExtractor(HTMLParser):
             self._parts.append(data)
     def get_text(self):
         lines = "".join(self._parts).splitlines()
-        # 过滤空行和 CSS 泄漏
-        _css_kv_re = re.compile(r'^[A-Za-z\-]+\s*:\s*\S')   # "color: red"
-        _css_prop_re = re.compile(                            # 孤立 CSS 属性名
-            r'^(?:font|color|background|margin|padding|border|display|width|height|'
-            r'text|line|letter|vertical|white|overflow|position|float|clear|'
-            r'visibility|opacity|cursor|list|table|content|flex|grid|align|justify)'
-            r'(?:-[a-z]+)*\s*$', re.IGNORECASE
-        )
+        # 过滤空行和明确的 CSS 键值对泄漏（如 "font-size: 14px"）
+        _css_kv_re = re.compile(r'^[a-z\-]+\s*:\s*[a-z0-9#.]+', re.IGNORECASE)
         lines = [l for l in lines if l.strip()
-                 and not _css_kv_re.match(l.strip())
-                 and not _css_prop_re.match(l.strip())]
+                 and not _css_kv_re.match(l.strip())]
         return re.sub(r'\n{3,}', '\n\n', "\n".join(lines)).strip()
 
 def html_to_text(raw: str) -> str:
