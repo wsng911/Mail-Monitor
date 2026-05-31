@@ -331,8 +331,6 @@ def _qq_idle_worker(acc: dict):
 
     while True:
         try:
-            import socket as _socket
-            _socket.setdefaulttimeout(30)
             imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
@@ -350,8 +348,8 @@ def _qq_idle_worker(acc: dict):
                 imap.send(b"IDLE\r\n")
                 imap.readline()  # 等待 "+ idling" 响应
 
-                # 等待服务器推送，最多 9 分钟
-                imap.socket().settimeout(540)
+                # 等待服务器推送，QQ 邮箱 IDLE 超时约 5 分钟
+                imap.socket().settimeout(360)
                 try:
                     line = imap.readline()
                     if b"EXISTS" in line or b"RECENT" in line:
@@ -366,17 +364,26 @@ def _qq_idle_worker(acc: dict):
                     else:
                         imap.send(b"DONE\r\n")
                         imap.readline()
-                except Exception:
-                    # 超时或断开，重新 IDLE
+                except (TimeoutError, OSError):
+                    # IDLE 超时是正常的（QQ 服务器 5 分钟断开），静默重新 IDLE
                     try:
+                        imap.socket().settimeout(10)
                         imap.send(b"DONE\r\n")
                         imap.readline()
+                    except Exception:
+                        break  # 连接真的断了，重连
+                    # noop 检测连接是否存活
+                    try:
+                        imap.noop()
                     except Exception:
                         break
 
         except Exception as e:
             err = str(e)
-            log.error(f"[QQ IDLE] {email} 连接断开: {e}")
+            if "timed out" in err.lower():
+                log.debug(f"[QQ IDLE] {email} 连接超时，重连中")
+            else:
+                log.error(f"[QQ IDLE] {email} 连接断开: {e}")
             if "Login fail" in err:
                 if not _login_fail_alerted:
                     _login_fail_alerted = True
