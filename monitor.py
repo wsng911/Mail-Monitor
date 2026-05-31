@@ -345,11 +345,11 @@ def _qq_idle_worker(acc: dict):
 
             # 进入 IDLE 循环
             while True:
+                imap.socket().settimeout(360)
                 imap.send(b"IDLE\r\n")
                 imap.readline()  # 等待 "+ idling" 响应
 
                 # 等待服务器推送，QQ 邮箱 IDLE 超时约 5 分钟
-                imap.socket().settimeout(360)
                 try:
                     line = imap.readline()
                     if b"EXISTS" in line or b"RECENT" in line:
