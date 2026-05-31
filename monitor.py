@@ -67,6 +67,9 @@ _CODE_COLON_RE = re.compile(
 def find_code(text: str) -> str | None:
     if not text:
         return None
+    # 如果输入是 HTML，先转纯文本
+    if "<" in text and ">" in text:
+        text = html_to_text(text)
     # 优先：上下文匹配
     for pattern in (_CODE_CONTEXT_RE, _CODE_COLON_RE):
         for m in pattern.finditer(text):
@@ -86,7 +89,9 @@ def find_code(text: str) -> str | None:
         if len(set(c.replace('-', ''))) == 1:
             continue
         return c
-    # 降级2：纯6位数字（无上下文，过滤更严格）
+    # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
+    if not re.search(r'验证|校验|确认|激活|动态码|verify|confirm|code|OTP|passcode|one.time|security|auth', text, re.IGNORECASE):
+        return None
     for m in CODE_RE.finditer(text):
         c = m.group()
         if len(set(c)) == 1:
