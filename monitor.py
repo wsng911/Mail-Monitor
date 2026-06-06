@@ -83,14 +83,20 @@ def find_code(text: str) -> str | None:
             if not c.isdigit() and digits <= len(c) / 2:
                 continue
             return c
-    # 降级1：XXXX-XXXX 格式（GitHub 无上下文时）
+    # 降级1：XXXX-XXXX 格式（GitHub 等，要求含字母避免匹配年份范围如 1999-2026）
     for m in _CODE_HYPHEN_RE.finditer(text):
         c = m.group(1).upper()
         if len(set(c.replace('-', ''))) == 1:
             continue
+        # 纯数字的 XXXX-XXXX 大概率是年份范围，跳过
+        if c.replace('-', '').isdigit():
+            continue
         return c
     # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
-    if not re.search(r'验证|校验|确认|激活|动态码|verify|confirm|code|OTP|passcode|one.time|security|auth', text, re.IGNORECASE):
+    if not re.search(r'验证|校验|确认码|激活码|动态码|verify|verification code|confirm.*code|code.*confirm|OTP|passcode|one.time|auth.*code|code.*auth', text, re.IGNORECASE):
+        return None
+    # 交易类邮件排除（PayPal、银行转账等不含验证码）
+    if re.search(r'transaction|transfer|payment|invoice|receipt|order|订单|转账|收款|付款|提交.*金额|金额.*提交', text, re.IGNORECASE):
         return None
     for m in CODE_RE.finditer(text):
         c = m.group()
@@ -101,8 +107,11 @@ def find_code(text: str) -> str | None:
             continue
         if c.endswith("0000"):
             continue
-        # 排除年份
-        if c[:4] in ("2024", "2025", "2026", "2023", "2022"):
+        # 排除年份（扩展范围）
+        if c[:4] in ("1999", "2000", "2001", "2002", "2003", "2004", "2005",
+                     "2006", "2007", "2008", "2009", "2010", "2011", "2012",
+                     "2013", "2014", "2015", "2016", "2017", "2018", "2019",
+                     "2020", "2021", "2022", "2023", "2024", "2025", "2026", "2027"):
             continue
         return c
     return None
