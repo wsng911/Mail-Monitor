@@ -78,18 +78,19 @@ def find_code(text: str) -> str | None:
                 continue
             if c in ("123456", "654321", "000000"):
                 continue
-            # 字母数字混合时，数字必须严格超过一半（排除订单号、账号ID等）
+            # 字母数字混合时，必须含至少1个数字（排除纯单词）
             digits = sum(ch.isdigit() for ch in c)
-            if not c.isdigit() and digits <= len(c) / 2:
+            if not c.isdigit() and digits == 0:
                 continue
             return c
-    # 降级1：XXXX-XXXX 格式（GitHub 等，要求含字母避免匹配年份范围如 1999-2026）
+    # 降级1：XXXX-XXXX 格式（GitHub 等，要求含字母且含数字，避免纯字母/纯数字）
     for m in _CODE_HYPHEN_RE.finditer(text):
         c = m.group(1).upper()
         if len(set(c.replace('-', ''))) == 1:
             continue
-        # 纯数字的 XXXX-XXXX 大概率是年份范围，跳过
-        if c.replace('-', '').isdigit():
+        raw = c.replace('-', '')
+        # 纯数字（年份范围）或纯字母（普通单词连字符）都跳过
+        if raw.isdigit() or raw.isalpha():
             continue
         return c
     # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
