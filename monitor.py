@@ -702,7 +702,7 @@ def _outlook_subscribe(acc: dict):
             json={
                 "changeType": "created",
                 "notificationUrl": OUTLOOK_PUSH_CALLBACK,
-                "resource": "me/messages",
+                "resource": "me/mailFolders('Inbox')/messages",
                 "expirationDateTime": expiry,
                 "clientState": email,
             },
