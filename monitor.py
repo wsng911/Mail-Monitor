@@ -53,7 +53,8 @@ _CODE_HYPHEN_RE = re.compile(r'\b([A-Z0-9]{4}-[A-Z0-9]{4})\b', re.IGNORECASE)
 _CODE_CONTEXT_RE = re.compile(
     r'(?:验证码|动态码|校验码|确认码|激活码|authorization code|verification code|'
     r'confirm(?:ation)? code|security code|one.time|OTP|passcode|access code|'
-    r'authentication code|auth(?:entication)?\s+code|sign.in code)'
+    r'authentication code|auth(?:entication)?\s+code|sign.in code|login code|'
+    r'your code|the code)'
     r'[^\n]{0,60}?(?<!\w)([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z]*\d[A-Z0-9]{3,7})\b',
     re.IGNORECASE
 )
