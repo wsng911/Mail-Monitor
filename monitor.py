@@ -433,7 +433,9 @@ def _imap_idle_worker(acc: dict, host: str):
         try:
             imap = imaplib.IMAP4_SSL(host, 993, timeout=30)
             imap.login(email, app_pass)
-            imap.select("INBOX")
+            status, _ = imap.select("INBOX")
+            if status != "OK":
+                raise RuntimeError(f"SELECT INBOX failed: {status}")
             _consecutive_fails = 0
 
             # 先处理已有未读
