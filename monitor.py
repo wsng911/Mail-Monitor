@@ -442,12 +442,29 @@ def _imap_idle_worker(acc: dict, host: str):
                 raise RuntimeError(f"SELECT INBOX failed: {status}")
             _consecutive_fails = 0
 
+            # 检查服务器是否支持 IDLE
+            _, caps = imap.capability()
+            supports_idle = b"IDLE" in (caps[0] if caps else b"")
+
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
             for uid in data[0].split():
                 if uid not in _seen_uids:
                     _seen_uids.add(uid)
                     _process_imap_uid(imap, uid, acc, label)
+
+            if not supports_idle:
+                # 降级：每 30 秒轮询一次
+                log.warning(f"[{tag} IDLE] {email} 服务器不支持 IDLE，降级为轮询（30s）")
+                while True:
+                    imap.noop()
+                    import time as _t; _t.sleep(30)
+                    _, data = imap.search(None, "UNSEEN")
+                    for uid in data[0].split():
+                        if uid not in _seen_uids:
+                            _seen_uids.add(uid)
+                            _process_imap_uid(imap, uid, acc, label)
+                # 永不到达，连接断开时由外层 except 捕获并重连
 
             # 进入 IDLE 循环
             while True:
