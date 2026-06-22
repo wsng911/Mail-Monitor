@@ -163,28 +163,30 @@ gmail_push:
 
 使用 `type: others`，程序自动根据邮件域名推断 IMAP 服务器：
 
-| 域名 | IMAP Host |
-|------|-----------|
-| 163.com | imap.163.com |
-| 126.com | imap.126.com |
-| yeah.net | imap.yeah.net |
-| 189.cn | imap.189.cn |
-| sina.com / sina.cn | imap.sina.com |
-| 139.com | imap.139.com |
-| sohu.com | imap.sohu.com |
-| aliyun.com | imap.aliyun.com |
+| 域名 | IMAP Host | 海外服务器支持 | 备注 |
+|------|-----------|:---:|------|
+| 163.com | imap.163.com | ❌ | 海外 IP 被封禁，无法使用 |
+| 126.com | imap.126.com | ❌ | 同 163，海外 IP 限制 |
+| yeah.net | imap.yeah.net | ❌ | 同 163，海外 IP 限制 |
+| 189.cn | imap.189.cn | ✅ | 正常 |
+| sina.com / sina.cn | imap.sina.com | ⚠️ | 连接不稳定，会频繁重连 |
+| 139.com | imap.139.com | ✅ | 需宽松 SSL，已内置支持 |
+| sohu.com | imap.sohu.com | ⚠️ | 未充分测试 |
+| aliyun.com | imap.aliyun.com | ✅ | 正常 |
 
 ```yaml
 - type: others
   mailboxes:
-    - label: 我的163
-      email: user@163.com
-      app_pass: "your_auth_code"
     - label: 我的189
       email: user@189.cn
       app_pass: "your_auth_code"
-      imap_host: "imap.189.cn"   # 可选，自动推断失败时手动指定
+    - label: 自定义
+      email: user@custom.com
+      app_pass: "your_auth_code"
+      imap_host: "imap.custom.com"   # 域名不在列表时手动指定
 ```
+
+> 163 / 126 / yeah.net 邮箱对海外 IP 有严格封禁，即使授权码正确也无法在境外服务器上使用，建议改用 189.cn 或 aliyun.com。
 
 使用 IMAP IDLE 长连接，延迟 1-5 秒，与 QQ 邮箱相同。
 
