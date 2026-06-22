@@ -1431,11 +1431,13 @@ def main():
     gmail_list   = _group("gmail")
     qq_list      = _group("qq")
     outlook_list = _group("outlook")
+    others_list  = _group("others")
 
     parts = []
     if gmail_list:   parts.append(f"📧 Gmail：\n{gmail_list}")
     if qq_list:      parts.append(f"📧 QQ：\n{qq_list}")
     if outlook_list: parts.append(f"📧 Outlook：\n{outlook_list}")
+    if others_list:  parts.append(f"📧 其他邮箱：\n{others_list}")
 
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
     if OAUTH_ENABLED:
