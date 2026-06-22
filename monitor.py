@@ -94,6 +94,20 @@ def find_code(text: str) -> str | None:
         if raw.isdigit() or raw.isalpha():
             continue
         return c
+    # 降级1.5：跨行上下文匹配（关键词和验证码分两行，如 Cloudflare Access 邮件）
+    _CROSS_LINE_RE = re.compile(
+        r'(?:验证码|动态码|OTP|passcode|access code|login code|your code|verification code|security code|one.time|auth.*code)'
+        r'[^\n]*\n\s*([A-Z]*\d[A-Z0-9]{3,7})\b',
+        re.IGNORECASE
+    )
+    for m in _CROSS_LINE_RE.finditer(text):
+        c = m.group(1).upper()
+        if len(set(c)) == 1 or c in ("123456", "654321", "000000"):
+            continue
+        raw = c.replace('-', '')
+        if not c.isdigit() and sum(ch.isdigit() for ch in c) == 0:
+            continue
+        return c
     # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
     if not re.search(r'验证|校验|确认码|激活码|动态码|verify|verification code|confirm.*code|code.*confirm|OTP|passcode|one.time|auth.*code|code.*auth', text, re.IGNORECASE):
         return None
