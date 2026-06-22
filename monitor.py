@@ -1,7 +1,7 @@
 """
 邮箱验证码监控 - 多账号，支持 Gmail(应用密码/Push) + Outlook(OAuth2)
 """
-import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading, base64, json
+import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading, base64, json, ssl
 from html.parser import HTMLParser
 from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -431,7 +431,11 @@ def _imap_idle_worker(acc: dict, host: str):
 
     while True:
         try:
-            imap = imaplib.IMAP4_SSL(host, 993, timeout=30)
+            _ssl_ctx = ssl.create_default_context()
+            _ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+            _ssl_ctx.check_hostname = False
+            _ssl_ctx.verify_mode = ssl.CERT_NONE
+            imap = imaplib.IMAP4_SSL(host, 993, ssl_context=_ssl_ctx, timeout=30)
             imap.login(email, app_pass)
             status, _ = imap.select("INBOX")
             if status != "OK":
