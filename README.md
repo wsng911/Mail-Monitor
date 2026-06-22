@@ -10,7 +10,7 @@
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.3`
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.4`
 
 ---
 
@@ -156,6 +156,37 @@ gmail_push:
 启动容器后访问 `https://your-domain.com/auth/gmail` 完成授权。
 
 > Gmail Watch 有效期 7 天，程序自动续期。
+
+---
+
+## 其他国内邮箱（163 / 126 / 189 / 新浪 / 阿里云等）
+
+使用 `type: others`，程序自动根据邮件域名推断 IMAP 服务器：
+
+| 域名 | IMAP Host |
+|------|-----------|
+| 163.com | imap.163.com |
+| 126.com | imap.126.com |
+| yeah.net | imap.yeah.net |
+| 189.cn | imap.189.cn |
+| sina.com / sina.cn | imap.sina.com |
+| 139.com | imap.139.com |
+| sohu.com | imap.sohu.com |
+| aliyun.com | imap.aliyun.com |
+
+```yaml
+- type: others
+  mailboxes:
+    - label: 我的163
+      email: user@163.com
+      app_pass: "your_auth_code"
+    - label: 我的189
+      email: user@189.cn
+      app_pass: "your_auth_code"
+      imap_host: "imap.189.cn"   # 可选，自动推断失败时手动指定
+```
+
+使用 IMAP IDLE 长连接，延迟 1-5 秒，与 QQ 邮箱相同。
 
 ---
 

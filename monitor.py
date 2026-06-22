@@ -392,25 +392,49 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
 def poll_gmail(acc: dict, skip_existing: bool = False) -> list[dict]:
     return _poll_imap(acc, "imap.gmail.com", skip_existing=skip_existing)
 
-# ── QQ 邮箱（授权码 + IMAP IDLE）────────────────────────────────────────────
-_qq_idle_threads: set[str] = set()  # 已启动 IDLE 的账号
+# ── 通用 IMAP IDLE（QQ / 163 / 126 等应用密码方案）─────────────────────────
+# 域名 → IMAP host 映射（others 类型自动推断，也可在 config 里用 imap_host 手动指定）
+_IMAP_HOST_MAP = {
+    "qq.com":      "imap.qq.com",
+    "foxmail.com": "imap.qq.com",
+    "gmail.com":   "imap.gmail.com",
+    "163.com":     "imap.163.com",
+    "126.com":     "imap.126.com",
+    "yeah.net":    "imap.yeah.net",
+    "189.cn":      "imap.189.cn",
+    "sina.com":    "imap.sina.com",
+    "sina.cn":     "imap.sina.com",
+    "139.com":     "imap.139.com",
+    "sohu.com":    "imap.sohu.com",
+    "aliyun.com":  "imap.aliyun.com",
+}
 
-def _qq_idle_worker(acc: dict):
-    """QQ IMAP IDLE 长连接，新邮件到达时立即处理"""
+def _get_imap_host(acc: dict) -> str | None:
+    """从账号配置或邮件域名推断 IMAP host"""
+    if acc.get("imap_host"):
+        return acc["imap_host"]
+    domain = acc.get("email", "").split("@")[-1].lower()
+    return _IMAP_HOST_MAP.get(domain)
+
+_imap_idle_threads: set[str] = set()  # 已启动 IDLE 的账号（qq + others）
+
+def _imap_idle_worker(acc: dict, host: str):
+    """通用 IMAP IDLE 长连接，支持 QQ / 163 / 126 等所有应用密码邮箱"""
     email = acc["email"]
     app_pass = acc["app_pass"]
     label = acc.get("label", email)
-    log.info(f"[QQ IDLE] {email} 启动 IDLE 监听")
+    tag = acc.get("type", "imap").upper()
+    log.info(f"[{tag} IDLE] {email} 启动 IDLE 监听 ({host})")
     _login_fail_alerted = False
-    _seen_uids: set[bytes] = set()  # 本次连接已处理的 UID
+    _seen_uids: set[bytes] = set()
     _consecutive_fails = 0
 
     while True:
         try:
-            imap = imaplib.IMAP4_SSL("imap.qq.com", 993, timeout=30)
+            imap = imaplib.IMAP4_SSL(host, 993, timeout=30)
             imap.login(email, app_pass)
             imap.select("INBOX")
-            _consecutive_fails = 0  # 连接成功，重置计数
+            _consecutive_fails = 0
 
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
@@ -425,11 +449,9 @@ def _qq_idle_worker(acc: dict):
                 imap.send(b"IDLE\r\n")
                 imap.readline()  # 等待 "+ idling" 响应
 
-                # 等待服务器推送，QQ 邮箱 IDLE 超时约 5 分钟
                 try:
                     line = imap.readline()
                     if b"EXISTS" in line or b"RECENT" in line:
-                        # 有新邮件，退出 IDLE 取邮件
                         imap.send(b"DONE\r\n")
                         imap.readline()
                         _, data = imap.search(None, "UNSEEN")
@@ -441,14 +463,12 @@ def _qq_idle_worker(acc: dict):
                         imap.send(b"DONE\r\n")
                         imap.readline()
                 except (TimeoutError, OSError):
-                    # IDLE 超时是正常的（QQ 服务器 5 分钟断开），静默重新 IDLE
                     try:
                         imap.socket().settimeout(10)
                         imap.send(b"DONE\r\n")
                         imap.readline()
                     except Exception:
-                        break  # 连接真的断了，重连
-                    # noop 检测连接是否存活
+                        break
                     try:
                         imap.noop()
                     except Exception:
@@ -457,22 +477,22 @@ def _qq_idle_worker(acc: dict):
         except Exception as e:
             err = str(e)
             if "timed out" in err.lower():
-                log.debug(f"[QQ IDLE] {email} IDLE 超时，重新连接")
+                log.debug(f"[{tag} IDLE] {email} IDLE 超时，重新连接")
                 time.sleep(1)
-                continue  # 超时是正常的，立即重连，不计入失败
+                continue
             else:
-                log.error(f"[QQ IDLE] {email} 连接断开: {e}")
-            if "Login fail" in err:
+                log.error(f"[{tag} IDLE] {email} 连接断开: {e}")
+            if "Login fail" in err or "Authentication failed" in err or "Invalid credentials" in err:
                 if not _login_fail_alerted:
                     _login_fail_alerted = True
-                    send_tg(f"⚠️ QQ邮箱账号失效：`{_esc(email)}`\n请重新生成授权码并更新配置")
+                    send_tg(f"⚠️ {tag}邮箱账号失效：`{_esc(email)}`\n请重新生成授权码并更新配置")
                 wait = 3600
             else:
                 _login_fail_alerted = False
                 _consecutive_fails += 1
                 wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)
                 if _consecutive_fails == 5:
-                    send_tg(f"⚠️ QQ邮箱连接异常：`{_esc(email)}`\n已连续失败 {_consecutive_fails} 次，等待重连中\n错误：{_esc(err[:80])}")
+                    send_tg(f"⚠️ {tag}邮箱连接异常：`{_esc(email)}`\n已连续失败 {_consecutive_fails} 次，等待重连中\n错误：{_esc(err[:80])}")
             time.sleep(wait)
 
 
@@ -522,7 +542,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                     f">{_esc('发件人')}: {_esc(sender)}\n"
                     f">{_esc('时间')}: {_esc(date)}\n"
                     f">{_esc('主题')}: {_esc(subject)}")
-            log.info(f"[QQ IDLE:{to_addr}] 验证码: {code}")
+            log.info(f"[IMAP IDLE:{to_addr}] 验证码: {code}")
             if send_tg(text) and FORWARD_ALL:
                 send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
@@ -533,24 +553,31 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                       f">{_esc('发件人')}: {_esc(sender)}\n"
                       f">{_esc('时间')}: {_esc(date)}\n"
                       f">{_esc('主题')}: {_esc(subject)}")
-            log.info(f"[QQ IDLE:{to_addr}] 转发邮件: {subject}")
+            log.info(f"[IMAP IDLE:{to_addr}] 转发邮件: {subject}")
             if send_tg(header):
                 send_tg_document(f"{_safe_filename(subject)}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
                 for att in attachments:
                     send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
-        log.error(f"[QQ IDLE] 处理邮件失败: {e}")
+        log.error(f"[IMAP IDLE] 处理邮件失败: {e}")
 
 
-def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
-    """QQ 邮箱：首次启动 IDLE 线程，之后不再轮询"""
+def poll_imap_idle(acc: dict, skip_existing: bool = False) -> list[dict]:
+    """QQ / others 邮箱：启动 IDLE 线程，不走轮询"""
     email = acc["email"]
-    if email not in _qq_idle_threads:
-        _qq_idle_threads.add(email)
-        threading.Thread(target=_qq_idle_worker, args=(acc,), daemon=True).start()
-        log.info(f"[QQ IDLE] {email} IDLE 线程已启动")
-    return []  # IDLE 模式不走轮询
+    if email not in _imap_idle_threads:
+        host = _get_imap_host(acc)
+        if not host:
+            log.error(f"[IMAP IDLE] {email} 无法推断 IMAP host，请在 config 中设置 imap_host")
+            return []
+        _imap_idle_threads.add(email)
+        threading.Thread(target=_imap_idle_worker, args=(acc, host), daemon=True).start()
+        log.info(f"[IMAP IDLE] {email} IDLE 线程已启动")
+    return []
+
+# 向下兼容别名
+poll_qq = poll_imap_idle
 
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
@@ -1520,20 +1547,16 @@ def main():
         if outlook_push_accs:
             threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
-    # 启动 QQ IDLE 线程（QQ 只支持 IDLE，不受 GLOBAL_MODE 影响）
+    # 启动 IMAP IDLE 线程（QQ / others，不受 GLOBAL_MODE 影响）
     for acc in accounts:
-        if acc.get("type", "").lower() == "qq":
-            email = acc["email"]
-            if email not in _qq_idle_threads:
-                _qq_idle_threads.add(email)
-                threading.Thread(target=_qq_idle_worker, args=(acc,), daemon=True).start()
-                log.info(f"[QQ IDLE] {email} IDLE 线程已启动")
+        if acc.get("type", "").lower() in ("qq", "others"):
+            poll_imap_idle(acc)
 
     # 判断是否有需要轮询的账号
     def _needs_poll(acc):
         t = acc.get("type", "").lower()
-        if t == "qq":
-            return False  # QQ 只用 IDLE
+        if t in ("qq", "others"):
+            return False  # 统一用 IDLE
         if GLOBAL_MODE == "idle":
             return True   # 强制 idle 模式，全部走轮询
         # push 模式下：已成功订阅/注册 watch 的账号不需要轮询
@@ -1559,8 +1582,8 @@ def main():
                     if GLOBAL_MODE == "push" and acc["email"] in _gmail_tokens:
                         return []
                     return poll_gmail(acc, skip_existing=skip)
-                elif t == "qq":
-                    return poll_qq(acc, skip_existing=skip)
+                elif t in ("qq", "others"):
+                    return poll_imap_idle(acc, skip_existing=skip)
                 elif t == "outlook":
                     if GLOBAL_MODE == "push" and acc.get("email") in _outlook_subscriptions:
                         return []
