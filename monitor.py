@@ -255,6 +255,19 @@ def wrap_html(html_body: str, *, subject: str = "", from_: str = "", to: str = "
         return re.sub(r'(<body[^>]*>)', r'\1' + header, html_body, count=1, flags=re.IGNORECASE)
     return header + html_body
 
+def _decode_bytes(data: bytes, charset: str | None) -> str:
+    """健壮解码：优先用声明编码，失败时依次尝试常见中文编码"""
+    charsets = []
+    if charset:
+        charsets.append(charset.lower().replace("_", "-"))
+    charsets += ["utf-8", "gb18030", "gbk", "gb2312", "big5", "latin-1"]
+    for enc in charsets:
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
 # ── 工具 ──────────────────────────────────────────────────────────────────────
 def extract_imap_body(msg) -> tuple[str, str]:
     """返回 (plain_body, html_body)"""
@@ -263,12 +276,16 @@ def extract_imap_body(msg) -> tuple[str, str]:
         for part in msg.walk():
             ct = part.get_content_type()
             if ct == "text/plain" and plain is None:
-                plain = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+                raw = part.get_payload(decode=True)
+                if raw:
+                    plain = _decode_bytes(raw, part.get_content_charset())
             elif ct == "text/html" and html_body is None:
-                html_body = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+                raw = part.get_payload(decode=True)
+                if raw:
+                    html_body = _decode_bytes(raw, part.get_content_charset())
         return plain or html_body or "", html_body or ""
     payload = msg.get_payload(decode=True)
-    decoded = payload.decode(msg.get_content_charset() or "utf-8", errors="replace") if payload else ""
+    decoded = _decode_bytes(payload, msg.get_content_charset()) if payload else ""
     ct = msg.get_content_type()
     if "html" in ct:
         return decoded, decoded
