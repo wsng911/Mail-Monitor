@@ -306,7 +306,7 @@ def extract_attachments(msg) -> list[dict]:
         # 解码文件名
         decoded_parts = decode_header(filename)
         filename = "".join(
-            p.decode(enc or "utf-8") if isinstance(p, bytes) else p
+            _decode_bytes(p, enc) if isinstance(p, bytes) else p
             for p, enc in decoded_parts
         )
         data = part.get_payload(decode=True)
@@ -320,14 +320,14 @@ def extract_attachments(msg) -> list[dict]:
 
 def decode_subject(msg) -> str:
     raw, enc = decode_header(msg.get("Subject", ""))[0]
-    return raw.decode(enc or "utf-8") if isinstance(raw, bytes) else (raw or "")
+    return _decode_bytes(raw, enc) if isinstance(raw, bytes) else (raw or "")
 
 def decode_from(msg) -> str:
     parts = decode_header(msg.get("From", ""))
     result = []
     for raw, enc in parts:
         if isinstance(raw, bytes):
-            result.append(raw.decode(enc or "utf-8", errors="replace"))
+            result.append(_decode_bytes(raw, enc))
         else:
             result.append(raw or "")
     return "".join(result)
