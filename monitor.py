@@ -103,21 +103,29 @@ def find_code(text: str) -> str | None:
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if _KW_RE.search(line):
-            # 从当前行及后续最多5行里找第一个候选验证码
-            for j in range(i, min(i + 6, len(lines))):
-                for m in _CANDIDATE_RE.finditer(lines[j]):
-                    c = m.group(1).upper()
-                    if len(set(c)) == 1:
-                        continue
-                    if c in ("123456", "654321", "000000"):
-                        continue
-                    if not c.isdigit() and sum(ch.isdigit() for ch in c) == 0:
-                        continue  # 纯字母跳过
-                    raw = c.replace('-', '')
-                    if raw.isdigit() and c[:4] in ("1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025","2026","2027"):
-                        continue
-                    return c
-            break  # 找到关键词但扫描完没结果，不继续
+            # 从下一行开始扫描（关键词所在行通常是描述句，干扰项多）
+            start = i + 1 if len(line) > 30 else i
+            scan_lines = lines[start:min(start + 6, len(lines))]
+            # 两轮：先找纯6位数字，再找字母数字混合
+            for pure_only in (True, False):
+                for scan_line in scan_lines:
+                    for m in _CANDIDATE_RE.finditer(scan_line):
+                        c = m.group(1).upper()
+                        if len(set(c)) == 1:
+                            continue
+                        if c in ("123456", "654321", "000000"):
+                            continue
+                        if not c.isdigit() and sum(ch.isdigit() for ch in c) == 0:
+                            continue  # 纯字母跳过
+                        if c.isdigit() and len(c) < 6:
+                            continue  # 纯数字至少6位
+                        if pure_only and not c.isdigit():
+                            continue  # 第一轮只要纯数字
+                        raw = c.replace('-', '')
+                        if raw.isdigit() and c[:4] in ("1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025","2026","2027"):
+                            continue
+                        return c
+            break
     # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
     if not re.search(r'验证|校验|确认码|激活码|动态码|verify|verification code|confirm.*code|code.*confirm|OTP|passcode|one.time|auth.*code|code.*auth', text, re.IGNORECASE):
         return None
