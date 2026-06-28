@@ -16,8 +16,18 @@ log = logging.getLogger(__name__)
 CONFIG_FILE = os.environ.get("CONFIG_FILE", "/config/config.yaml")
 
 def load_config() -> dict:
-    with open(CONFIG_FILE) as f:
-        return yaml.safe_load(f)
+    try:
+        with open(CONFIG_FILE) as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ValueError("config.yaml 内容为空或格式错误")
+        return data
+    except FileNotFoundError:
+        print(f"\n[ERROR] 找不到配置文件：{CONFIG_FILE}\n请先创建 config.yaml\n", flush=True)
+        raise SystemExit(1)
+    except yaml.YAMLError as e:
+        print(f"\n[ERROR] config.yaml 格式错误，请检查缩进和语法：\n{e}\n", flush=True)
+        raise SystemExit(1)
 
 cfg = load_config()
 TG_BOT_TOKEN  = cfg["telegram"]["bot_token"]
