@@ -456,7 +456,10 @@ _imap_idle_threads: set[str] = set()  # 已启动 IDLE 的账号（qq + others�
 def _imap_idle_worker(acc: dict, host: str):
     """通用 IMAP IDLE 长连接，支持 QQ / 163 / 126 等所有应用密码邮箱"""
     email = acc["email"]
-    app_pass = acc["app_pass"]
+    app_pass = acc.get("app_pass")
+    if not app_pass:
+        log.error(f"[IMAP IDLE] {email} 缺少 app_pass，跳过")
+        return
     label = acc.get("label", email)
     tag = acc.get("type", "imap").upper()
     log.info(f"[{tag} IDLE] {email} 启动 IDLE 监听 ({host})")
@@ -474,7 +477,11 @@ def _imap_idle_worker(acc: dict, host: str):
             imap.login(email, app_pass)
             status, _ = imap.select("INBOX")
             if status != "OK":
-                raise RuntimeError(f"SELECT INBOX failed: {status}")
+                err_msg = str(_)
+                if "frequent" in err_msg.lower() or "reject" in err_msg.lower():
+                    log.warning(f"[{tag} IDLE] {email} 频率限制，等待 5 分钟")
+                    time.sleep(300)
+                raise RuntimeError(f"SELECT INBOX failed: {status} {_}")
             _consecutive_fails = 0
 
             # 检查服务器是否支持 IDLE
