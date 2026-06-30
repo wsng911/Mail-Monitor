@@ -129,6 +129,8 @@ def find_code(text: str) -> str | None:
                             continue  # 纯字母跳过
                         if c.isdigit() and len(c) < 6:
                             continue  # 纯数字至少6位
+                        if c.isdigit() and len(c) > 6:
+                            continue  # 纯数字只取6位，7位以上大概率是积分/ID/手机号
                         if pure_only and not c.isdigit():
                             continue  # 第一轮只要纯数字
                         raw = c.replace('-', '')
@@ -582,7 +584,18 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             if msg_dt < STARTUP_TIME:
                 return
         except Exception:
-            pass
+            # Date 解析失败：用内部时间戳兜底，解析不了则保守跳过（避免历史邮件推送）
+            try:
+                internal = msg.get("X-Received") or msg.get("Received", "")
+                # 简单尝试从 Received 头提取时间
+                from email.utils import parsedate_to_datetime as _p
+                dt_str = re.search(r';\s*(.+)$', internal, re.MULTILINE)
+                if dt_str:
+                    msg_dt2 = _p(dt_str.group(1).strip()).astimezone(timezone.utc).replace(tzinfo=timezone.utc)
+                    if msg_dt2 < STARTUP_TIME:
+                        return
+            except Exception:
+                pass  # 实在解析不了，放行（宁可重复推送也不丢失）
 
         if not (code or FORWARD_ALL):
             return
@@ -1448,14 +1461,31 @@ def _save_gmail_token(email: str, refresh_token: str):
             inserted = True
 
     if not inserted:
-        content = "".join(new_lines)
-        new_entry = (
+        # 找到 type: gmail 块的末尾插入，而不是追加到文件末尾
+        new_lines2 = []
+        gmail_block_end = -1
+        in_gmail = False
+        for idx, line in enumerate(new_lines):
+            if re.match(r'\s*-\s+type:\s*gmail', line):
+                in_gmail = True
+            elif in_gmail and re.match(r'\s*-\s+type:', line):
+                in_gmail = False  # 进入下一个 type 块
+            if in_gmail:
+                gmail_block_end = idx
+
+        new_entry_lines = (
             f"      - email: \"{email}\"\n"
             f"        label: \"{email}\"\n"
             f"        gmail_refresh_token: \"{refresh_token}\"\n"
         )
-        content += ("\n  - type: gmail\n    mailboxes:\n" if "type: gmail" not in content else "") + new_entry
-        new_lines = [content]
+        if gmail_block_end >= 0:
+            # 在 gmail 块末尾插入
+            new_lines.insert(gmail_block_end + 1, new_entry_lines)
+        else:
+            # gmail 块不存在，追加新块到末尾
+            content = "".join(new_lines)
+            content = content.rstrip() + "\n  - type: gmail\n    mailboxes:\n" + new_entry_lines
+            new_lines = [content]
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
