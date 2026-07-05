@@ -485,6 +485,7 @@ def _imap_idle_worker(acc: dict, host: str):
                     time.sleep(300)
                 raise RuntimeError(f"SELECT INBOX failed: {status} {_}")
             _consecutive_fails = 0
+            _report_dns_ok(email)  # 连接成功，清除 DNS 失败计数
 
             # 检查服务器是否支持 IDLE
             _, caps = imap.capability()
@@ -549,12 +550,17 @@ def _imap_idle_worker(acc: dict, host: str):
                 continue
             else:
                 log.error(f"[{tag} IDLE] {email} 连接断开: {e}")
-            if "Login fail" in err or "Authentication failed" in err or "Invalid credentials" in err:
+            if "name resolution" in err.lower() or "errno -3" in err.lower():
+                _report_dns_fail(email)
+                wait = 300  # DNS 失败等 5 分钟再重试
+            elif "Login fail" in err or "Authentication failed" in err or "Invalid credentials" in err:
+                _report_dns_ok(email)
                 if not _login_fail_alerted:
                     _login_fail_alerted = True
                     send_tg(f"⚠️ {tag}邮箱账号失效：`{_esc(email)}`\n请重新生成授权码并更新配置")
                 wait = 3600
             else:
+                _report_dns_ok(email)
                 _login_fail_alerted = False
                 _consecutive_fails += 1
                 wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)
@@ -661,6 +667,30 @@ poll_qq = poll_imap_idle
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
 _token_fail_alerted: set[str] = set()  # 已推送过失效通知的账号
 _gmail_fail_alerted: set[str] = set()  # Gmail token 失效已通知的账号
+
+# DNS 失败全局监控
+import threading as _threading
+_dns_fail_lock = _threading.Lock()
+_dns_fail_counts: dict[str, int] = {}   # email -> 连续 DNS 失败次数
+_dns_alert_sent = False                  # 是否已发送 DNS 告警
+
+def _report_dns_fail(email: str):
+    """记录 DNS 失败，全部账号连续失败 3 次以上时发 TG 告警"""
+    global _dns_alert_sent
+    with _dns_fail_lock:
+        _dns_fail_counts[email] = _dns_fail_counts.get(email, 0) + 1
+        if not _dns_alert_sent and all(v >= 3 for v in _dns_fail_counts.values()) and len(_dns_fail_counts) >= 3:
+            _dns_alert_sent = True
+            send_tg("⚠️ 网络异常：DNS 解析持续失败，所有邮件监控已中断\n请检查服务器网络和 Docker DNS 配置")
+
+def _report_dns_ok(email: str):
+    """DNS 恢复时清除计数，如已告警则发恢复通知"""
+    global _dns_alert_sent
+    with _dns_fail_lock:
+        _dns_fail_counts[email] = 0
+        if _dns_alert_sent and all(v == 0 for v in _dns_fail_counts.values()):
+            _dns_alert_sent = False
+            send_tg("✅ 网络已恢复，邮件监控重新启动")
 _processed_msg_ids: set[str] = set()  # 已处理的 Graph message id
 
 def _outlook_refresh(acc: dict) -> dict:
