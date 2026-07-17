@@ -144,7 +144,17 @@ def find_code(text: str) -> str | None:
     # 交易类邮件排除（PayPal、银行转账等不含验证码）
     if re.search(r'transaction|transfer|payment|invoice|receipt|order|订单|转账|收款|付款|提交.*金额|金额.*提交', text, re.IGNORECASE):
         return None
-    for m in CODE_RE.finditer(text):
+    # 降级2只在关键词附近（前后5行）搜索，避免全文扫描误判帖子编号
+    _kw2_re = re.compile(r'验证|校验|确认码|激活码|动态码|verify|verification code|confirm.*code|code.*confirm|OTP|passcode|one.time|auth.*code|code.*auth', re.IGNORECASE)
+    lines = text.splitlines()
+    search_lines = []
+    for i, line in enumerate(lines):
+        if _kw2_re.search(line):
+            search_lines += lines[max(0, i-2):min(len(lines), i+6)]
+    search_text = "\n".join(search_lines) if search_lines else ""
+    if not search_text:
+        return None
+    for m in CODE_RE.finditer(search_text):
         c = m.group()
         if len(set(c)) == 1:
             continue
