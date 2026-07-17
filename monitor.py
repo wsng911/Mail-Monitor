@@ -218,9 +218,11 @@ def send_tg(text: str) -> bool:
         if r.status_code == 200:
             return True
         log.error(f"TG 推送失败: {r.text}")
-        # MarkdownV2 解析失败时降级为纯文本重试
+        # MarkdownV2 解析失败时降级为纯文本重试（只去掉反斜杠转义，保留原文）
+        plain = re.sub(r'\\(.)', r'\1', text)  # 去掉 \ 转义，还原原始字符
+        plain = re.sub(r'[`*_\[\]()~>#+=|{}.!\-]', '', plain)  # 再删 TG 特殊字符
         r2 = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-                        json={"chat_id": TG_CHAT_ID, "text": re.sub(r'[\\`*_\[\]()~>#+=|{}.!\-]', '', text)},
+                        json={"chat_id": TG_CHAT_ID, "text": plain},
                         timeout=10)
         return r2.status_code == 200
     except Exception as e:
@@ -493,10 +495,11 @@ def _imap_idle_worker(acc: dict, host: str):
 
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
-            for uid in data[0].split():
-                if uid not in _seen_uids:
-                    _seen_uids.add(uid)
-                    _process_imap_uid(imap, uid, acc, label)
+            new_uids = [uid for uid in data[0].split() if uid not in _seen_uids]
+            for uid in new_uids:
+                _seen_uids.add(uid)
+            for uid in new_uids:
+                _process_imap_uid(imap, uid, acc, label)
 
             if not supports_idle:
                 # 降级：每 30 秒轮询一次
@@ -523,10 +526,12 @@ def _imap_idle_worker(acc: dict, host: str):
                         imap.send(b"DONE\r\n")
                         imap.readline()
                         _, data = imap.search(None, "UNSEEN")
-                        for uid in data[0].split():
-                            if uid not in _seen_uids:
-                                _seen_uids.add(uid)
-                                _process_imap_uid(imap, uid, acc, label)
+                        new_uids = [uid for uid in data[0].split() if uid not in _seen_uids]
+                        # 先全部加入 _seen_uids，防止两次 EXISTS 触发时重复处理
+                        for uid in new_uids:
+                            _seen_uids.add(uid)
+                        for uid in new_uids:
+                            _process_imap_uid(imap, uid, acc, label)
                     else:
                         imap.send(b"DONE\r\n")
                         imap.readline()
