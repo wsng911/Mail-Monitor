@@ -108,14 +108,21 @@ def find_code(text: str) -> str | None:
             continue
         return c
     # 降级1：XXXX-XXXX 格式（GitHub 等，要求含字母且含数字，避免纯字母/纯数字）
-    for m in _CODE_HYPHEN_RE.finditer(text):
-        c = m.group(1).upper()
-        if len(set(c.replace('-', ''))) == 1:
-            continue
-        raw = c.replace('-', '')
-        if raw.isdigit() or raw.isalpha():
-            continue
-        return c
+    # 必须邮件整体含验证码相关词汇，防止工单号/引用号被误识别
+    _hyphen_kw_re = re.compile(
+        r'验证码|动态码|校验码|确认码|激活码|verify|verification|confirm.*code|OTP|passcode|'
+        r'one.time|auth.*code|login code|access code|security code|your code|recovery code',
+        re.IGNORECASE
+    )
+    if _hyphen_kw_re.search(text):
+        for m in _CODE_HYPHEN_RE.finditer(text):
+            c = m.group(1).upper()
+            if len(set(c.replace('-', ''))) == 1:
+                continue
+            raw = c.replace('-', '')
+            if raw.isdigit() or raw.isalpha():
+                continue
+            return c
     # 降级1.5：关键词出现后向后扫描多行，匹配到第一个验证码即停止
     _KW_RE = re.compile(
         r'(?:验证码|动态码|OTP|passcode|access code|login code|your code|'
@@ -721,6 +728,7 @@ def _report_dns_ok(email: str):
             _dns_alert_sent = False
             send_tg("✅ 网络已恢复，邮件监控重新启动")
 _processed_msg_ids: set[str] = set()  # 已处理的 Graph message id
+_processed_msg_ids_lock = threading.Lock()  # 防止并发通知竞争条件
 
 def _outlook_refresh(acc: dict) -> dict:
     client_id = acc.get("client_id") or OAUTH_CLIENT_ID or OUTLOOK_DEFAULT_CLIENT_ID
@@ -921,9 +929,12 @@ def _process_outlook_push(data: dict):
                 m = re.search(r"messages\('([^']+)'\)", res_path)
                 if m:
                     msg_id = m.group(1)
-            if not email or not msg_id or msg_id in _processed_msg_ids:
+            if not email or not msg_id:
                 continue
-            _processed_msg_ids.add(msg_id)
+            with _processed_msg_ids_lock:
+                if msg_id in _processed_msg_ids:
+                    continue
+                _processed_msg_ids.add(msg_id)
 
             # 找到对应账号
             acc = next((a for a in _outlook_accounts if a.get("email") == email), None)
