@@ -74,6 +74,13 @@ _CODE_COLON_RE = re.compile(
     r'([A-Z0-9]{4}-[A-Z0-9]{4}|[A-Z0-9]{4,8})\b',
     re.IGNORECASE
 )
+# 长 hex token：关键词后紧跟 16-64 位十六进制字符串（如 NodeSeek 的 24位 hex 验证码）
+_CODE_HEX_RE = re.compile(
+    r'(?:验证码|动态码|校验码|确认码|激活码|verification code|security code|OTP|passcode|access code|'
+    r'auth(?:entication)?\s*code|login code|your code)'
+    r'.{0,10}?([0-9a-f]{16,64})\b',
+    re.IGNORECASE
+)
 
 def find_code(text: str) -> str | None:
     if not text:
@@ -94,6 +101,12 @@ def find_code(text: str) -> str | None:
             if not c.isdigit() and digits == 0:
                 continue
             return c
+    # 长 hex token：16-64 位十六进制（如 NodeSeek 24位 hex 验证码）
+    for m in _CODE_HEX_RE.finditer(text):
+        c = m.group(1).lower()
+        if len(set(c)) == 1:  # 排除全同字符如 aaaaaa...
+            continue
+        return c
     # 降级1：XXXX-XXXX 格式（GitHub 等，要求含字母且含数字，避免纯字母/纯数字）
     for m in _CODE_HYPHEN_RE.finditer(text):
         c = m.group(1).upper()
