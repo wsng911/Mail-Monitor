@@ -612,6 +612,16 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         if not raw or not raw[0]:
             return
         msg = email_lib.message_from_bytes(raw[0][1])
+
+        # Message-ID 全局去重，防止重连后 UID 变化导致重复推送
+        msg_id_hdr = msg.get("Message-ID", "").strip()
+        if msg_id_hdr:
+            with _processed_imap_msgids_lock:
+                if msg_id_hdr in _processed_imap_msgids:
+                    imap.store(uid, "+FLAGS", "\\Seen")
+                    return
+                _processed_imap_msgids.add(msg_id_hdr)
+
         subject = decode_subject(msg)
         body, html_body = extract_imap_body(msg)
         attachments = extract_attachments(msg)
@@ -729,6 +739,8 @@ def _report_dns_ok(email: str):
             send_tg("✅ 网络已恢复，邮件监控重新启动")
 _processed_msg_ids: set[str] = set()  # 已处理的 Graph message id
 _processed_msg_ids_lock = threading.Lock()  # 防止并发通知竞争条件
+_processed_imap_msgids: set[str] = set()  # 已处理的 IMAP Message-ID（跨重连去重）
+_processed_imap_msgids_lock = threading.Lock()
 
 def _outlook_refresh(acc: dict) -> dict:
     client_id = acc.get("client_id") or OAUTH_CLIENT_ID or OUTLOOK_DEFAULT_CLIENT_ID
