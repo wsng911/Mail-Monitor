@@ -476,6 +476,9 @@ _IMAP_HOST_MAP = {
     "139.com":     "imap.139.com",
     "sohu.com":    "imap.sohu.com",
     "aliyun.com":  "imap.aliyun.com",
+    "icloud.com":  "imap.mail.me.com",
+    "me.com":      "imap.mail.me.com",
+    "mac.com":     "imap.mail.me.com",
 }
 
 def _get_imap_host(acc: dict) -> str | None:
@@ -666,9 +669,13 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
 
         attach_html = (html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>") + att_html
 
+        # Apple ID 关联显示（iCloud 账号可选配置 apple_id 字段）
+        apple_id = acc.get("apple_id", "")
+        apple_id_line = f"\n>{_esc('Apple ID')}: {_esc(apple_id)}" if apple_id else ""
+
         if code:
             text = (f"`{code}`\n\n"
-                    f">{_esc('📬')} *{_esc(to_addr)}*\n"
+                    f">{_esc('📬')} *{_esc(to_addr)}*{apple_id_line}\n"
                     f">{_esc('发件人')}: {_esc(sender)}\n"
                     f">{_esc('时间')}: {_esc(date)}\n"
                     f">{_esc('主题')}: {_esc(subject)}")
@@ -679,7 +686,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                 for att in attachments:
                     send_tg_file(att["filename"], att["data"], att["content_type"])
         elif FORWARD_ALL:
-            header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
+            header = (f">{_esc('📩')} *{_esc(to_addr)}*{apple_id_line}\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
                       f">{_esc('时间')}: {_esc(date)}\n"
                       f">{_esc('主题')}: {_esc(subject)}")

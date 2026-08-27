@@ -41,3 +41,14 @@ accounts:
         refresh_token: "0.AXXX..."
         client_id: ""         # 留空使用内置值
         client_secret: ""     # 自建 Azure 应用时填写
+
+  # ── iCloud（Apple 应用专用密码）─────────────────────────────────────────
+  # 需要：Apple ID 开启双重认证 + 生成应用专用密码
+  # 教程：appleid.apple.com → 登录和安全 → 应用专用密码 → 点击 +
+  # 支持 @icloud.com / @me.com / @mac.com，IMAP host 自动推断
+  - type: others
+    mailboxes:
+      - label: 我的iCloud
+        email: you@icloud.com
+        app_pass: "xxxx-xxxx-xxxx-xxxx"   # Apple 应用专用密码（带连字符）
+        apple_id: "you@gmail.com"         # 可选：关联的 Apple ID，推送时显示

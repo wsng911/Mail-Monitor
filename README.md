@@ -1,16 +1,17 @@
 # Mail-Monitor
 
-监控 Gmail / QQ邮箱 / Outlook 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
+监控 Gmail / QQ邮箱 / Outlook / iCloud 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
 
 | 邮箱 | 获取方式 | 延迟 | 认证方式 |
 |------|---------|:----:|---------|
 | Gmail | IMAP IDLE | ~1-3 秒 | 应用专用密码 |
 | QQ邮箱 | IMAP IDLE | ~1-3 秒 | 授权码 |
+| iCloud | IMAP IDLE | ~1-3 秒 | 应用专用密码 |
 | Gmail | Pub/Sub Push | ~1-5 秒 | OAuth2 |
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.4`
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.6.0`
 
 ---
 
@@ -173,6 +174,7 @@ gmail_push:
 | 139.com | imap.139.com | ✅ | 需宽松 SSL，已内置支持 |
 | sohu.com | imap.sohu.com | ⚠️ | 未充分测试 |
 | aliyun.com | imap.aliyun.com | ✅ | 正常 |
+| icloud.com / me.com / mac.com | imap.mail.me.com | ✅ | 需 Apple 应用专用密码 |
 
 ```yaml
 - type: others
@@ -189,6 +191,34 @@ gmail_push:
 > 163 / 126 / yeah.net 邮箱对海外 IP 有严格封禁，即使授权码正确也无法在境外服务器上使用，建议改用 189.cn 或 aliyun.com。
 
 使用 IMAP IDLE 长连接，延迟 1-5 秒，与 QQ 邮箱相同。
+
+---
+
+## iCloud 配置
+
+**1. 开启双重认证**
+
+iCloud 邮箱要求 Apple ID 已开启双重认证才能生成应用专用密码。
+
+**2. 生成应用专用密码**
+
+1. 打开 [appleid.apple.com](https://appleid.apple.com) 并登录
+2. 「登录和安全」→「应用专用密码」→ 点击 `+`
+3. 填写名称（如 `mail-monitor`），生成后立即复制（**只显示一次**）
+
+> Apple ID 登录邮箱可以是 Gmail 等第三方邮箱，生成的应用专用密码同样适用于 iCloud 邮箱。
+
+**3. 配置示例**
+
+```yaml
+- type: others
+  mailboxes:
+    - label: 我的iCloud
+      email: user@icloud.com
+      app_pass: "xxxx-xxxx-xxxx-xxxx"   # Apple 应用专用密码
+```
+
+支持 `@icloud.com`、`@me.com`、`@mac.com` 三种地址，IMAP host 自动推断，无需手动填写。
 
 ---
 
