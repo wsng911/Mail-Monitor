@@ -211,11 +211,12 @@ iCloud 邮箱要求 Apple ID 已开启双重认证才能生成应用专用密码
 **3. 配置示例**
 
 ```yaml
-- type: others
+- type: icloud
   mailboxes:
     - label: 我的iCloud
       email: user@icloud.com
       app_pass: "xxxx-xxxx-xxxx-xxxx"   # Apple 应用专用密码
+      apple_id: "you@gmail.com"         # 可选：关联的 Apple ID，推送时显示
 ```
 
 支持 `@icloud.com`、`@me.com`、`@mac.com` 三种地址，IMAP host 自动推断，无需手动填写。

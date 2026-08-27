@@ -46,7 +46,7 @@ accounts:
   # 需要：Apple ID 开启双重认证 + 生成应用专用密码
   # 教程：appleid.apple.com → 登录和安全 → 应用专用密码 → 点击 +
   # 支持 @icloud.com / @me.com / @mac.com，IMAP host 自动推断
-  - type: others
+  - type: icloud
     mailboxes:
       - label: 我的iCloud
         email: you@icloud.com

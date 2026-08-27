@@ -1615,12 +1615,14 @@ def main():
     gmail_list   = _group("gmail")
     qq_list      = _group("qq")
     outlook_list = _group("outlook")
+    icloud_list  = _group("icloud")
     others_list  = _group("others")
 
     parts = []
     if gmail_list:   parts.append(f"📧 Gmail：\n{gmail_list}")
     if qq_list:      parts.append(f"📧 QQ：\n{qq_list}")
     if outlook_list: parts.append(f"📧 Outlook：\n{outlook_list}")
+    if icloud_list:  parts.append(f"📧 iCloud：\n{icloud_list}")
     if others_list:  parts.append(f"📧 其他邮箱：\n{others_list}")
 
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
@@ -1733,15 +1735,15 @@ def main():
         if outlook_push_accs:
             threading.Thread(target=_renew_outlook_subscriptions, daemon=True).start()
 
-    # 启动 IMAP IDLE 线程（QQ / others，不受 GLOBAL_MODE 影响）
+    # 启动 IMAP IDLE 线程（QQ / iCloud / others，不受 GLOBAL_MODE 影响）
     for acc in accounts:
-        if acc.get("type", "").lower() in ("qq", "others"):
+        if acc.get("type", "").lower() in ("qq", "others", "icloud"):
             poll_imap_idle(acc)
 
     # 判断是否有需要轮询的账号
     def _needs_poll(acc):
         t = acc.get("type", "").lower()
-        if t in ("qq", "others"):
+        if t in ("qq", "others", "icloud"):
             return False  # 统一用 IDLE
         if GLOBAL_MODE == "idle":
             return True   # 强制 idle 模式，全部走轮询
