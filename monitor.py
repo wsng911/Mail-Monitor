@@ -1693,11 +1693,11 @@ def main():
     others_accs, others_list = _group("others")
 
     parts = []
-    if gmail_list:   parts.append(f"📧 Gmail[{len(gmail_accs)}]：\n{gmail_list}")
-    if qq_list:      parts.append(f"📧 QQ[{len(qq_accs)}]：\n{qq_list}")
-    if outlook_list: parts.append(f"📧 Outlook[{len(outlook_accs)}]：\n{outlook_list}")
-    if icloud_list:  parts.append(f"📧 iCloud[{len(icloud_accs)}]：\n{icloud_list}")
-    if others_list:  parts.append(f"📧 其他邮箱[{len(others_accs)}]：\n{others_list}")
+    if gmail_list:   parts.append(f"📧 Gmail \\[{len(gmail_accs)}\\]：\n{gmail_list}")
+    if qq_list:      parts.append(f"📧 QQ \\[{len(qq_accs)}\\]：\n{qq_list}")
+    if outlook_list: parts.append(f"📧 Outlook \\[{len(outlook_accs)}\\]：\n{outlook_list}")
+    if icloud_list:  parts.append(f"📧 iCloud \\[{len(icloud_accs)}\\]：\n{icloud_list}")
+    if others_list:  parts.append(f"📧 其他邮箱 \\[{len(others_accs)}\\]：\n{others_list}")
 
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
     if OAUTH_ENABLED:
@@ -1777,17 +1777,6 @@ def main():
     ]))
 
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
-    
-    # 统计各 type 邮箱数量
-    type_counts = {}
-    for acc in accounts:
-        t = acc.get("type", "unknown").lower()
-        type_counts[t] = type_counts.get(t, 0) + 1
-    
-    count_msg = "📊 邮箱类型统计：\n" + "\n".join(
-        f"  {t.upper()}: {count} 个" for t, count in sorted(type_counts.items())
-    )
-    send_tg(count_msg)
 
     # 加载已有 Gmail Push token 并注册 watch
     if GLOBAL_MODE == "push" and GMAIL_PUSH_ENABLED:
