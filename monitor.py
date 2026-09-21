@@ -535,16 +535,36 @@ def _imap_idle_worker(acc: dict, host: str):
                 _process_imap_uid(imap, uid, acc, label)
 
             if not supports_idle:
-                # 降级：每 30 秒轮询一次
+                # 降级：每 30 秒轮询一次（同时检查 INBOX 和 Spam）
                 log.warning(f"[{tag} IDLE] {email} 服务器不支持 IDLE，降级为轮询（30s）")
                 while True:
                     imap.noop()
                     import time as _t; _t.sleep(30)
+                    # 检查 INBOX
                     _, data = imap.search(None, "UNSEEN")
                     for uid in (data[0] or b"").split():
                         if uid not in _seen_uids:
                             _seen_uids.add(uid)
                             _process_imap_uid(imap, uid, acc, label)
+                    # 检查 Spam 文件夹（尝试多个名称）
+                    for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
+                        try:
+                            status, _ = imap.select(spam_folder)
+                            if status == "OK":
+                                _, data = imap.search(None, "UNSEEN")
+                                for uid in (data[0] or b"").split():
+                                    if uid not in _seen_uids:
+                                        _seen_uids.add(uid)
+                                        log.info(f"[{tag}:SPAM] {email} 垃圾邮件新邮件")
+                                        _process_imap_uid(imap, uid, acc, label)
+                                break
+                        except Exception:
+                            continue
+                    # 切回 INBOX
+                    try:
+                        imap.select("INBOX")
+                    except Exception:
+                        break
                 # 永不到达，连接断开时由外层 except 捕获并重连
 
             # 进入 IDLE 循环
@@ -570,7 +590,7 @@ def _imap_idle_worker(acc: dict, host: str):
                         imap.send(b"DONE\r\n")
                         imap.readline()
                 except (TimeoutError, OSError):
-                    # 60秒无数据，主动 noop 检查一次
+                    # 60秒无数据，主动 noop 检查一次（INBOX + Spam）
                     try:
                         imap.socket().settimeout(10)
                         imap.noop()
@@ -581,6 +601,23 @@ def _imap_idle_worker(acc: dict, host: str):
                                 _seen_uids.add(uid)
                             for uid in new_uids:
                                 _process_imap_uid(imap, uid, acc, label)
+                        # 检查 Spam 文件夹
+                        for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
+                            try:
+                                status, _ = imap.select(spam_folder)
+                                if status == "OK":
+                                    _, data = imap.search(None, "UNSEEN")
+                                    spam_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
+                                    if spam_uids:
+                                        for uid in spam_uids:
+                                            _seen_uids.add(uid)
+                                            log.info(f"[{tag}:SPAM] {email} 检测到垃圾邮件")
+                                        for uid in spam_uids:
+                                            _process_imap_uid(imap, uid, acc, label)
+                                    imap.select("INBOX")  # 切回 INBOX
+                                    break
+                            except Exception:
+                                continue
                         # 继续 IDLE
                         continue
                     except Exception:
