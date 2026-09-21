@@ -424,7 +424,7 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
         imap = _get_imap(acc["email"], acc["app_pass"], host)
         imap.select("INBOX")
         _, data = imap.search(None, "UNSEEN")
-        for uid in data[0].split():
+        for uid in (data[0] or b"").split():
             _, raw = imap.fetch(uid, "(RFC822)")
             if not raw or not raw[0]:
                 continue
@@ -528,7 +528,7 @@ def _imap_idle_worker(acc: dict, host: str):
 
             # 先处理已有未读
             _, data = imap.search(None, "UNSEEN")
-            new_uids = [uid for uid in data[0].split() if uid not in _seen_uids]
+            new_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
             for uid in new_uids:
                 _seen_uids.add(uid)
             for uid in new_uids:
@@ -541,7 +541,7 @@ def _imap_idle_worker(acc: dict, host: str):
                     imap.noop()
                     import time as _t; _t.sleep(30)
                     _, data = imap.search(None, "UNSEEN")
-                    for uid in data[0].split():
+                    for uid in (data[0] or b"").split():
                         if uid not in _seen_uids:
                             _seen_uids.add(uid)
                             _process_imap_uid(imap, uid, acc, label)
@@ -559,7 +559,7 @@ def _imap_idle_worker(acc: dict, host: str):
                         imap.send(b"DONE\r\n")
                         imap.readline()
                         _, data = imap.search(None, "UNSEEN")
-                        new_uids = [uid for uid in data[0].split() if uid not in _seen_uids]
+                        new_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
                         # 先全部加入 _seen_uids，防止两次 EXISTS 触发时重复处理
                         for uid in new_uids:
                             _seen_uids.add(uid)
@@ -602,7 +602,13 @@ def _imap_idle_worker(acc: dict, host: str):
                 _login_fail_alerted = False
                 _consecutive_fails += 1
                 wait = min(15 * (2 ** (_consecutive_fails - 1)), 300)
-                if _consecutive_fails == 5:
+                # 新错误类型立即通知一次，之后只在连续5次时再通知
+                err_key = err[:60]
+                if _consecutive_fails == 1:
+                    if _should_alert(f"imap_conn_err_{email}"):
+                        send_tg(f"⚠️ {tag}邮箱连接异常：`{_esc(email)}`\n错误：{_esc(err_key)}\n正在尝试重连...")
+                elif _consecutive_fails == 5:
+                    _reset_alert(f"imap_conn_err_{email}")  # 重置，下次恢复后能再通知
                     send_tg(f"⚠️ {tag}邮箱连接异常：`{_esc(email)}`\n已连续失败 {_consecutive_fails} 次，等待重连中\n错误：{_esc(err[:80])}")
                 _report_dns_fail(email)  # 计入全局网络失败
             time.sleep(wait)
@@ -624,6 +630,9 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                     imap.store(uid, "+FLAGS", "\\Seen")
                     return
                 _processed_imap_msgids.add(msg_id_hdr)
+                # 内存上限：超过 10000 条时清掉集合（重连后重新去重即可）
+                if len(_processed_imap_msgids) > 10000:
+                    _processed_imap_msgids.clear()
 
         subject = decode_subject(msg)
         body, html_body = extract_imap_body(msg)
@@ -698,6 +707,11 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                     send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[IMAP IDLE] 处理邮件失败: {e}")
+        try:
+            if _should_alert(f"imap_process_err_{label}"):
+                send_tg(f"⚠️ IMAP 邮件处理异常（{label}），可能漏收\n错误：{_esc(str(e)[:100])}")
+        except Exception:
+            pass
 
 
 def poll_imap_idle(acc: dict, skip_existing: bool = False) -> list[dict]:
@@ -720,6 +734,27 @@ poll_qq = poll_imap_idle
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
 _token_fail_alerted: set[str] = set()  # 已推送过失效通知的账号
 _gmail_fail_alerted: set[str] = set()  # Gmail token 失效已通知的账号
+_gmail_fail_alerted_lock = threading.Lock()  # 保护 _gmail_fail_alerted 和 _gmail_idle_fallback 并发访问
+
+# ── 通知限流（防止网络抖动时刷屏）────────────────────────────────────────────
+_alert_cooldown: dict[str, float] = {}  # key -> 上次通知时间戳
+_alert_cooldown_lock = threading.Lock()
+_ALERT_COOLDOWN_SEC = 600  # 同一 key 10 分钟内不重复通知
+
+def _should_alert(key: str) -> bool:
+    """判断是否应该发送通知（限流），返回 True 表示可以发"""
+    now = time.time()
+    with _alert_cooldown_lock:
+        last = _alert_cooldown.get(key, 0)
+        if now - last < _ALERT_COOLDOWN_SEC:
+            return False
+        _alert_cooldown[key] = now
+        return True
+
+def _reset_alert(key: str):
+    """恢复正常时重置限流，允许下次异常立即通知"""
+    with _alert_cooldown_lock:
+        _alert_cooldown.pop(key, None)
 
 # 网络连接失败全局监控（DNS/超时/断网等任何连接层面的失败）
 import threading as _threading
@@ -732,7 +767,11 @@ def _report_dns_fail(email: str):
     global _dns_alert_sent
     with _dns_fail_lock:
         _dns_fail_counts[email] = _dns_fail_counts.get(email, 0) + 1
-        if not _dns_alert_sent and len(_dns_fail_counts) >= 3 and all(v >= 3 for v in _dns_fail_counts.values()):
+        # 动态门槛：注册账号数 >= 3 时要求 3 个账号各失败 3 次；账号数少时只需 1 个账号连续失败 3 次
+        total = len(_dns_fail_counts)
+        threshold_accs = max(1, min(3, total))
+        failing_accs = sum(1 for v in _dns_fail_counts.values() if v >= 3)
+        if not _dns_alert_sent and failing_accs >= threshold_accs:
             _dns_alert_sent = True
             send_tg("⚠️ 网络异常：所有邮件连接持续失败，监控已中断\n请检查服务器网络连接")
 
@@ -816,8 +855,10 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
         return results
     for msg in r.json().get("value", []):
         msg_id = msg.get("id", "")
-        if msg_id in _processed_msg_ids:
-            continue
+        with _processed_msg_ids_lock:
+            if msg_id in _processed_msg_ids:
+                continue
+            _processed_msg_ids.add(msg_id)
         subject = msg.get("subject", "")
         sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
         body    = msg.get("body", {}).get("content", "")
@@ -835,7 +876,6 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
                             json={"isRead": True}, headers=headers, timeout=3)
             except Exception:
                 pass
-            _processed_msg_ids.add(msg_id)
             continue
         code    = find_code(body) or find_code(subject)
         to_addr = next((rc["emailAddress"]["address"] for rc in msg.get("toRecipients", [])
@@ -847,7 +887,6 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
                         json={"isRead": True}, headers=headers, timeout=3)
         except Exception:
             pass
-        _processed_msg_ids.add(msg_id)
     return results
 
 def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
@@ -860,7 +899,7 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
             if imap.select(folder)[0] != "OK":
                 continue
             _, data = imap.search(None, "UNSEEN")
-            for uid in data[0].split():
+            for uid in (data[0] or b"").split():
                 _, raw = imap.fetch(uid, "(RFC822)")
                 if not raw or not raw[0]:
                     continue
@@ -954,6 +993,8 @@ def _process_outlook_push(data: dict):
                 if msg_id in _processed_msg_ids:
                     continue
                 _processed_msg_ids.add(msg_id)
+                if len(_processed_msg_ids) > 10000:
+                    _processed_msg_ids.clear()
 
             # 找到对应账号
             acc = next((a for a in _outlook_accounts if a.get("email") == email), None)
@@ -1048,6 +1089,11 @@ def _process_outlook_push(data: dict):
                             send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
+        try:
+            if _should_alert("outlook_push_err"):
+                send_tg(f"⚠️ Outlook Push 处理异常，可能漏收邮件\n错误：{_esc(str(e)[:100])}")
+        except Exception:
+            pass
 
 def _renew_outlook_subscriptions():
     """每 2.5 天自动续期所有 Outlook 订阅"""
@@ -1062,13 +1108,16 @@ _outlook_accounts: list[dict] = []  # 启动时填充
 _gmail_tokens: dict[str, dict] = {}  # email -> {access_token, refresh_token, expiry, label}
 _gmail_push_lock = threading.Lock()
 _gmail_last_history: dict[str, str] = {}  # email -> last processed historyId
+_gmail_accounts: list[dict] = []           # 启动时填充，用于 Push 失效降级 IDLE
+_gmail_idle_fallback: set[str] = set()     # Push 失效已降级到 IDLE 的账号
 
 GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify"
 
 def _gmail_refresh_token(email: str) -> str:
     t = _gmail_tokens.get(email)
     if not t:
-        raise RuntimeError(f"Gmail token 不存在: {email}")
+        log.error(f"Gmail token 不存在: {email}")
+        return ""
     if time.time() < t.get("expiry", 0) and t.get("access_token"):
         return t["access_token"]
     r = httpx.post(GMAIL_TOKEN_URL, data={
@@ -1080,12 +1129,30 @@ def _gmail_refresh_token(email: str) -> str:
     d = r.json()
     if "access_token" not in d:
         err = d.get("error", "")
-        if err == "invalid_grant" and email not in _gmail_fail_alerted:
-            _gmail_fail_alerted.add(email)
-            auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/gmail")
-            send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{_esc(auth_url)}")
-        raise RuntimeError(f"Gmail token 刷新失败: {email} {d}")
-    _gmail_fail_alerted.discard(email)  # 刷新成功，清除失效记录
+        if err == "invalid_grant":
+            with _gmail_fail_alerted_lock:
+                already_alerted = email in _gmail_fail_alerted
+                if not already_alerted:
+                    _gmail_fail_alerted.add(email)
+            if not already_alerted:
+                auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/gmail")
+                # 尝试降级到 IMAP IDLE
+                acc = next((a for a in _gmail_accounts if a.get("email") == email), None)
+                with _gmail_fail_alerted_lock:
+                    need_fallback = acc and acc.get("app_pass") and email not in _gmail_idle_fallback
+                    if need_fallback:
+                        _gmail_idle_fallback.add(email)
+                if need_fallback:
+                    threading.Thread(target=_imap_idle_worker, args=(acc, "imap.gmail.com"), daemon=True).start()
+                    send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n已自动降级为 IMAP IDLE 继续接收\n请重新授权恢复 Push：{_esc(auth_url)}")
+                    log.warning(f"[Gmail] {email} token 失效，已降级为 IMAP IDLE")
+                else:
+                    send_tg(f"⚠️ Gmail token 已失效：`{_esc(email)}`\n原因：refresh\\_token 已过期或被撤销\n请重新授权：{_esc(auth_url)}")
+        # 吞掉异常，保证整体运行不中断
+        log.error(f"Gmail token 刷新失败: {email} {d}")
+        return _gmail_tokens.get(email, {}).get("access_token", "")
+    with _gmail_fail_alerted_lock:
+        _gmail_fail_alerted.discard(email)  # 刷新成功，清除失效记录
     _gmail_tokens[email]["access_token"] = d["access_token"]
     _gmail_tokens[email]["expiry"] = time.time() + d.get("expires_in", 3600) - 60
     return d["access_token"]
@@ -1236,9 +1303,10 @@ def _process_gmail_push(data: dict):
         for record in history_data.get("history", []):
             for added in record.get("messagesAdded", []):
                 msg_id = added["message"]["id"]
-                if msg_id in _processed_msg_ids:
-                    continue
-                _processed_msg_ids.add(msg_id)
+                with _processed_msg_ids_lock:
+                    if msg_id in _processed_msg_ids:
+                        continue
+                    _processed_msg_ids.add(msg_id)
                 item = _gmail_fetch_message(email, msg_id)
                 if not item:
                     continue
@@ -1292,6 +1360,11 @@ def _process_gmail_push(data: dict):
                                 send_tg_file(att["filename"], att["data"], att["content_type"])
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
+        try:
+            if _should_alert(f"gmail_push_err_{email}"):
+                send_tg(f"⚠️ Gmail Push 处理异常，可能漏收邮件\n错误：{_esc(str(e)[:100])}")
+        except Exception:
+            pass
 
 def _renew_gmail_watches():
     """每 6 天自动续期所有 Gmail Watch"""
@@ -1709,6 +1782,7 @@ def main():
         for acc in accounts:
             if acc.get("type") == "gmail":
                 email = acc["email"]
+                _gmail_accounts.append(acc)  # 保存全局引用，用于 Push 失效时降级 IDLE
                 if acc.get("gmail_refresh_token"):
                     _gmail_tokens[email] = {
                         "access_token": "",

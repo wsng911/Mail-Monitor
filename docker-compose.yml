@@ -3,9 +3,22 @@ services:
     image: wsng911/mail-monitor:latest
     container_name: mail-monitor
     restart: unless-stopped
-    environment:
-      - TZ=Asia/Shanghai
-    ports:
-      - "8080:8080"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    mem_limit: 2g
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500k"
+        max-file: "3"
+    networks:
+      - nginx_net
     volumes:
       - ./config:/config
+    environment:
+      - TZ=Asia/Shanghai
+
+networks:
+  nginx_net:
+    external: true
