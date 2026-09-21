@@ -546,10 +546,10 @@ def _imap_idle_worker(acc: dict, host: str):
                         if uid not in _seen_uids:
                             _seen_uids.add(uid)
                             _process_imap_uid(imap, uid, acc, label)
-                    # 检查 Spam 文件夹（尝试多个名称）
+                    # 检查 Spam 文件夹（用 EXAMINE 只读模式，不改变 INBOX 状态）
                     for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
                         try:
-                            status, _ = imap.select(spam_folder)
+                            status, _ = imap.examine(spam_folder)
                             if status == "OK":
                                 _, data = imap.search(None, "UNSEEN")
                                 for uid in (data[0] or b"").split():
@@ -557,14 +557,11 @@ def _imap_idle_worker(acc: dict, host: str):
                                         _seen_uids.add(uid)
                                         log.info(f"[{tag}:SPAM] {email} 垃圾邮件新邮件")
                                         _process_imap_uid(imap, uid, acc, label)
+                                # 切回 INBOX（SELECT 重新标记为可修改）
+                                imap.select("INBOX")
                                 break
                         except Exception:
                             continue
-                    # 切回 INBOX
-                    try:
-                        imap.select("INBOX")
-                    except Exception:
-                        break
                 # 永不到达，连接断开时由外层 except 捕获并重连
 
             # 进入 IDLE 循环
@@ -601,10 +598,10 @@ def _imap_idle_worker(acc: dict, host: str):
                                 _seen_uids.add(uid)
                             for uid in new_uids:
                                 _process_imap_uid(imap, uid, acc, label)
-                        # 检查 Spam 文件夹
+                        # 检查 Spam 文件夹（用 EXAMINE 只读模式）
                         for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
                             try:
-                                status, _ = imap.select(spam_folder)
+                                status, _ = imap.examine(spam_folder)
                                 if status == "OK":
                                     _, data = imap.search(None, "UNSEEN")
                                     spam_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
@@ -614,11 +611,14 @@ def _imap_idle_worker(acc: dict, host: str):
                                             log.info(f"[{tag}:SPAM] {email} 检测到垃圾邮件")
                                         for uid in spam_uids:
                                             _process_imap_uid(imap, uid, acc, label)
-                                    imap.select("INBOX")  # 切回 INBOX
                                     break
                             except Exception:
                                 continue
-                        # 继续 IDLE
+                        # 切回 INBOX 继续 IDLE（SELECT 确保回到可修改状态）
+                        try:
+                            imap.select("INBOX")
+                        except Exception:
+                            pass
                         continue
                     except Exception:
                         try:
@@ -1213,6 +1213,9 @@ def _gmail_watch(email: str):
     """注册 Gmail Push Watch，有效期 7 天"""
     try:
         token = _gmail_refresh_token(email)
+        if not token:
+            log.warning(f"[Gmail Push] {email} token 为空，跳过 watch 注册")
+            return
         r = httpx.post(
             f"https://gmail.googleapis.com/gmail/v1/users/me/watch",
             headers={"Authorization": f"Bearer {token}"},
@@ -1232,6 +1235,9 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
     """获取单封邮件内容"""
     try:
         token = _gmail_refresh_token(email)
+        if not token:
+            log.warning(f"[Gmail] {email} token 为空，跳过获取 {msg_id}")
+            return None
         r = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
             headers={"Authorization": f"Bearer {token}"},
@@ -1336,6 +1342,9 @@ def _process_gmail_push(data: dict):
             return
 
         token = _gmail_refresh_token(email)
+        if not token:
+            log.warning(f"[Gmail Push] {email} token 为空，跳过处理 push 通知")
+            return
         # 用上次记录的 historyId，没有则用推送的 historyId
         start_id = _gmail_last_history.get(email) or str(max(1, int(history_id) - 1))
         r = httpx.get(
