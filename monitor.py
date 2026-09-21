@@ -1683,20 +1683,21 @@ def main():
     log.info(f"加载 {len(accounts)} 个账号")
 
     def _group(t):
-        return "\n".join(f"`{a['email']}`" for a in accounts if a.get("type","").lower()==t and a.get("email"))
+        items = [a for a in accounts if a.get("type","").lower()==t and a.get("email")]
+        return items, "\n".join(f"`{a['email']}`" for a in items)
 
-    gmail_list   = _group("gmail")
-    qq_list      = _group("qq")
-    outlook_list = _group("outlook")
-    icloud_list  = _group("icloud")
-    others_list  = _group("others")
+    gmail_accs, gmail_list   = _group("gmail")
+    qq_accs, qq_list         = _group("qq")
+    outlook_accs, outlook_list = _group("outlook")
+    icloud_accs, icloud_list = _group("icloud")
+    others_accs, others_list = _group("others")
 
     parts = []
-    if gmail_list:   parts.append(f"📧 Gmail：\n{gmail_list}")
-    if qq_list:      parts.append(f"📧 QQ：\n{qq_list}")
-    if outlook_list: parts.append(f"📧 Outlook：\n{outlook_list}")
-    if icloud_list:  parts.append(f"📧 iCloud：\n{icloud_list}")
-    if others_list:  parts.append(f"📧 其他邮箱：\n{others_list}")
+    if gmail_list:   parts.append(f"📧 Gmail[{len(gmail_accs)}]：\n{gmail_list}")
+    if qq_list:      parts.append(f"📧 QQ[{len(qq_accs)}]：\n{qq_list}")
+    if outlook_list: parts.append(f"📧 Outlook[{len(outlook_accs)}]：\n{outlook_list}")
+    if icloud_list:  parts.append(f"📧 iCloud[{len(icloud_accs)}]：\n{icloud_list}")
+    if others_list:  parts.append(f"📧 其他邮箱[{len(others_accs)}]：\n{others_list}")
 
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
     if OAUTH_ENABLED:
