@@ -548,8 +548,9 @@ def _imap_idle_worker(acc: dict, host: str):
                 # 永不到达，连接断开时由外层 except 捕获并重连
 
             # 进入 IDLE 循环
+            idle_timeout = 60  # 60秒无数据则主动 noop 检查
             while True:
-                imap.socket().settimeout(360)
+                imap.socket().settimeout(idle_timeout)
                 imap.send(b"IDLE\r\n")
                 imap.readline()  # 等待 "+ idling" 响应
 
@@ -569,12 +570,26 @@ def _imap_idle_worker(acc: dict, host: str):
                         imap.send(b"DONE\r\n")
                         imap.readline()
                 except (TimeoutError, OSError):
+                    # 60秒无数据，主动 noop 检查一次
                     try:
                         imap.socket().settimeout(10)
-                        imap.send(b"DONE\r\n")
-                        imap.readline()
+                        imap.noop()
+                        _, data = imap.search(None, "UNSEEN")
+                        new_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
+                        if new_uids:
+                            for uid in new_uids:
+                                _seen_uids.add(uid)
+                            for uid in new_uids:
+                                _process_imap_uid(imap, uid, acc, label)
+                        # 继续 IDLE
+                        continue
                     except Exception:
-                        break
+                        try:
+                            imap.socket().settimeout(10)
+                            imap.send(b"DONE\r\n")
+                            imap.readline()
+                        except Exception:
+                            break
                     try:
                         imap.noop()
                     except Exception:
