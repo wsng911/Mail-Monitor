@@ -1737,11 +1737,13 @@ def _sort_accounts():
 
 
 def _save_outlook_account(refresh_token: str, email: str):
-    """更新已有账号的 token，不存在则追加"""
+    """保存 Outlook refresh_token 到对应的 type: outlook 分组"""
     with open(CONFIG_FILE) as f:
-        content = f.read()
+        lines = f.readlines()
 
-    # 用 yaml 解析判断是否已存在
+    content = ''.join(lines)
+    
+    # 先检查邮箱是否已存在
     data = yaml.safe_load(content)
     exists = False
     for entry in data.get("accounts", []):
@@ -1752,7 +1754,7 @@ def _save_outlook_account(refresh_token: str, email: str):
                     break
 
     if exists:
-        # 替换该邮箱对应的 refresh_token（找到 email 行后的第一个 refresh_token）
+        # 替换该邮箱对应的 refresh_token
         import re as _re
         pattern = rf'(email:\s*["\']?{_re.escape(email)}["\']?\s*\n\s+refresh_token:\s*)[^\n]+'
         new_content = _re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
@@ -1760,19 +1762,36 @@ def _save_outlook_account(refresh_token: str, email: str):
             f.write(new_content)
         return
 
-    # 不存在则追加
-    new_entry = (
-        f"  - label: \"{email}\"\n"
-        f"    email: \"{email}\"\n"
-        f"    refresh_token: \"{refresh_token}\"\n"
-    )
-    if "type: outlook" in content:
-        content = content.rstrip() + "\n" + new_entry
+    # 不存在：找到 type: outlook 块的末尾，插入新账户
+    outlook_start = -1
+    outlook_end = -1
+    
+    for i, line in enumerate(lines):
+        if re.match(r'^-\s+type:\s+outlook\s*$', line):
+            outlook_start = i
+        elif outlook_start >= 0 and outlook_end == -1:
+            # 找到第一个非缩进的行，标记为 outlook 块结束位置
+            if line.strip() and not line.startswith((' ', '\t')):
+                outlook_end = i
+                break
+    
+    if outlook_end == -1:
+        outlook_end = len(lines)
+    
+    # 在 outlook 块末尾插入新账户
+    new_entry = f"  - label: \"{email}\"\n    email: \"{email}\"\n    refresh_token: \"{refresh_token}\"\n"
+    
+    if outlook_start >= 0:
+        # outlook 块存在，插入到末尾
+        lines.insert(outlook_end, new_entry)
     else:
-        content = content.rstrip() + "\n  - type: outlook\n    mailboxes:\n" + new_entry
-
+        # outlook 块不存在，在末尾创建
+        if lines and not lines[-1].endswith('\n'):
+            lines.append('\n')
+        lines.append(f"- type: outlook\n  mailboxes:\n{new_entry}")
+    
     with open(CONFIG_FILE, "w") as f:
-        f.write(content)
+        f.writelines(lines)
     
     # 重新排序账号
     _sort_accounts()
