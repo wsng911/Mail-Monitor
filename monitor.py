@@ -1805,7 +1805,7 @@ def main():
         ("📋 配置信息", [
             "项目：`mail-monitor-493615`",
             "Topic：`projects/mail-monitor-493615/topics/gmail-push`",
-            "客户端 ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`",
+            "客户端 ID：从 GCP 凭据页面获取（格式如 `xxx-yyy.apps.googleusercontent.com`）",
             "回调：`https://oa.idays.eu.org/api/gmail/oauth/callback`",
         ]),
         ("重装后操作", [
