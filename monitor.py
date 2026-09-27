@@ -1914,9 +1914,10 @@ def main():
         t = threading.Thread(target=start_oauth_server, daemon=True)
         t.start()
 
-    # 启动时：先去重，再排序
+    # 启动时：先去重
     _deduplicate_config()
-    _sort_accounts()
+    # 排序逻辑暂时禁用，等修复完成
+    # _sort_accounts()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
