@@ -1655,7 +1655,7 @@ def _normalize_config():
     if not config or "accounts" not in config:
         return
     
-    # 第一步：按 type 分组并去重（同 type + 同 email 只保留一个）
+    # 第一步：按 type 分组并去重（同 type + 同 email 只保留一个），同时修复字段名
     accounts_by_type = {}
     seen = {}  # (type, email) -> True
     
@@ -1672,6 +1672,17 @@ def _normalize_config():
             key = (acc_type, email)
             if key not in seen:
                 seen[key] = True
+                
+                # 修复字段名：根据 type 确保使用正确的 token 字段
+                if acc_type == "gmail":
+                    # Gmail 应该用 gmail_refresh_token
+                    if "refresh_token" in mb and "gmail_refresh_token" not in mb:
+                        mb["gmail_refresh_token"] = mb.pop("refresh_token")
+                elif acc_type in ["outlook", "icloud", "qq"]:
+                    # 其他类型应该用 refresh_token
+                    if "gmail_refresh_token" in mb:
+                        mb["refresh_token"] = mb.pop("gmail_refresh_token")
+                
                 unique_mbs.append(mb)
         
         if unique_mbs:
@@ -1693,9 +1704,14 @@ def _normalize_config():
     old_json = json.dumps(config.get("accounts", []), sort_keys=True)
     new_json = json.dumps(new_accounts, sort_keys=True)
     
-    log.info(f"[DEBUG] 去重前 accounts 块数: {len(config.get('accounts', []))}, 去重后: {len(new_accounts)}")
+    # 统计信息
+    old_count = sum(len(acc.get("mailboxes", [])) for acc in config.get("accounts", []))
+    new_count = sum(len(acc.get("mailboxes", [])) for acc in new_accounts)
+    log.info(f"[DEBUG] 去重前: {len(config.get('accounts', []))} 块, {old_count} 个账户")
+    log.info(f"[DEBUG] 去重后: {len(new_accounts)} 块, {new_count} 个账户")
     
     if old_json != new_json:
+        log.info(f"[DEBUG] 配置结构已改变，准备重写")
         config["accounts"] = new_accounts
         
         # 写入临时文件
