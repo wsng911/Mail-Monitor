@@ -11,7 +11,7 @@
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v1.6.0`
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v2.1.0`
 
 ---
 
@@ -41,6 +41,57 @@ services:
 ```
 
 > `latest` 与 `v1` 为同一镜像。
+
+---
+
+## config.yaml 配置管理
+
+### 自动规范化（v2.1.0+）
+
+容器启动时，系统自动执行配置规范化，包括：
+
+**1. 去重**
+- 同一 `type` 下，相同 `email` 的账户只保留一个
+- 不同 `type` 的相同 `email` 会被保留（例如 Gmail 和 Outlook 都有该邮箱）
+
+**2. 排序**
+- **Type 顺序**：`gmail` → `icloud` → `qq` → `outlook` → `others`
+- **账户顺序**：同一 type 内的账户按 email 字母序排列（不区分大小写）
+
+**3. 格式规范**
+- 删除 `mailboxes` 列表内的所有空行
+- 保留 type 块之间的单个空行
+- 确保字段正确：Gmail 用 `gmail_refresh_token`，其他类型用 `refresh_token`
+
+**4. 自动修复**
+- 若检测到格式错误或重复账户，自动重写配置文件
+- 使用原子性写入（临时文件 → 原子移动），保证数据安全
+
+**示例：**
+```yaml
+# 规范化后的顺序
+accounts:
+  - type: gmail
+    mailboxes:
+      - label: 账户1
+        email: account1@gmail.com
+        gmail_refresh_token: "..."
+      - label: 账户2
+        email: account2@gmail.com
+        gmail_refresh_token: "..."
+
+  - type: qq
+    mailboxes:
+      - label: QQ账户
+        email: 123@qq.com
+        app_pass: "..."
+
+  - type: outlook
+    mailboxes:
+      - label: Outlook账户
+        email: user@outlook.com
+        refresh_token: "..."
+```
 
 ---
 
@@ -390,3 +441,12 @@ oauth:
 
 **Q: 收不到 Telegram 消息**
 - 确认 `bot_token` 和 `chat_id` 正确；确认已给 bot 发过消息
+
+**Q: 配置文件被重写了，账户顺序变了**
+- 这是正常行为（v2.1.0+）。启动时系统自动规范化配置，包括排序和去重
+- 排序规则：按 type 顺序 (gmail → icloud → qq → outlook → others)，同 type 内按 email 字母序
+- 不想要自动排序的话，只能回退到 v2.0.x（不推荐，v2.1.0 改进了稳定性）
+
+**Q: 同一邮箱出现两次（如 Gmail 和 Outlook 账户同邮箱）**
+- 这是正常的，不同 type 的相同 email 会被保留，因为它们可能有不同的 token
+- 同一 type 下的重复账户会被自动去重，只保留一个
