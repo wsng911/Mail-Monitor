@@ -892,7 +892,7 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
         log.error(f"[Outlook:{email}] {e}")
         if email not in _token_fail_alerted:
             _token_fail_alerted.add(email)
-            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：https://oa\\.idays\\.gq/auth/outlook")
+            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：https://oa.idays.eu.org/auth/outlook")
     return results
 
 def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
