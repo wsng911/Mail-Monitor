@@ -1497,8 +1497,9 @@ class OAuthHandler(BaseHTTPRequestHandler):
             try:
                 rt, email = _exchange_code(code)
                 _save_outlook_account(rt, email)
-                self._respond(200, f"✅ 授权成功！{email} 已添加，监控将在下一轮询周期生效。")
-                send_tg(f"✅ Outlook 账号已授权：`{email}`")
+                email_display = email or "（未获取到邮箱地址）"
+                self._respond(200, f"✅ 授权成功！{email_display} 已添加，监控将在下一轮询周期生效。")
+                send_tg(f"✅ Outlook 账号已授权：{email_display}")
                 log.info(f"新 Outlook 账号授权成功：{email}")
             except Exception as e:
                 self._respond(500, f"授权失败: {e}")
@@ -1603,6 +1604,8 @@ def _exchange_code(code: str) -> tuple[str, str]:
                        params={"$select": "mail,userPrincipalName"}, timeout=10)
         me_data = me.json()
         email = me_data.get("mail") or me_data.get("userPrincipalName", "")
+        if not email:
+            log.warning(f"Outlook API 返回的用户信息中没有邮箱地址：{me_data}")
     except Exception:
         pass
     return d["refresh_token"], email
@@ -1786,8 +1789,8 @@ def main():
     accounts = list(seen.values())
     log.info(f"加载 {len(accounts)} 个账号")
 
-    # 域名变更通知
-    send_tg("✅ Mail Monitor 已启动\\n\\n🔄 **域名已更新**：`idays.gq` → `idays.eu.org`\\n确保 DNS 和 SSL 证书已更新。OAuth 回调地址已自动更新。")
+    # 启动通知
+    send_tg("✅ Mail Monitor 已启动")
 
     def _group(t):
         items = [a for a in accounts if a.get("type","").lower()==t and a.get("email")]
