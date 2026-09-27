@@ -1688,12 +1688,24 @@ def _normalize_config():
                 "mailboxes": accounts_by_type[acc_type]
             })
     
-    # 第三步：如果有变化，重写配置文件
+    # 第三步：如果有变化，写入临时文件，然后原子性覆盖
     if new_accounts != config.get("accounts", []):
         config["accounts"] = new_accounts
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        log.info(f"✓ 配置已规范化（去重+排序）")
+        
+        # 写入临时文件
+        import tempfile
+        import shutil
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.yaml', dir=os.path.dirname(CONFIG_FILE))
+        try:
+            with os.fdopen(temp_fd, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            # 原子性覆盖原文件
+            shutil.move(temp_path, CONFIG_FILE)
+            log.info(f"✓ 配置已规范化（去重+排序）")
+        except:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise
 
 
 def _save_outlook_account(refresh_token: str, email: str):
@@ -1799,8 +1811,7 @@ def main():
         t.start()
 
     # 启动时：规范化配置（去重+排序+格式统一）
-    # 暂时禁用，调试中
-    # _normalize_config()
+    _normalize_config()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
