@@ -1688,7 +1688,11 @@ def _normalize_config():
         if unique_mbs:
             accounts_by_type[acc_type] = unique_mbs
     
-    # 第二步：按指定顺序重建 accounts 列表
+    # 第二步：对每个 type 内的账户按 email 字母序排序
+    for acc_type in accounts_by_type:
+        accounts_by_type[acc_type].sort(key=lambda mb: mb.get("email", "").lower())
+    
+    # 第四步：按指定顺序重建 accounts 列表
     type_order = ["gmail", "icloud", "qq", "outlook", "others"]
     new_accounts = []
     
@@ -1699,7 +1703,7 @@ def _normalize_config():
                 "mailboxes": accounts_by_type[acc_type]
             })
     
-    # 第三步：如果有变化，或者格式不规范，都需要重写
+    # 第五步：如果有变化，或者格式不规范，都需要重写
     import json
     import tempfile
     import shutil
