@@ -37,7 +37,7 @@ FORWARD_ALL   = cfg.get("forward_all", False)
 
 # OAuth2 回调服务配置
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
-OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "8c66bce8-c8a3-4b75-8120-58e307a85a3e")
+OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "")
 OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")  # 公开客户端不使用 secret
 OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.eu.org/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
