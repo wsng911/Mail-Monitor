@@ -1705,9 +1705,33 @@ def _normalize_config():
         try:
             with os.fdopen(temp_fd, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            
+            # 清理 yaml.dump 产生的列表项之间的空行
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            
+            # 删除 mailboxes 下列表项之间的空行（但保留 accounts 顶级之间的空行）
+            lines = content.split('\n')
+            cleaned_lines = []
+            in_mailboxes = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith('mailboxes:'):
+                    in_mailboxes = True
+                elif line.startswith('- type:') or (line.strip() and not line.startswith(' ')):
+                    in_mailboxes = False
+                
+                # 删除 mailboxes 下的空行，但保留其他地方的空行
+                if in_mailboxes and line.strip() == '' and cleaned_lines and cleaned_lines[-1].strip() == '':
+                    continue
+                
+                cleaned_lines.append(line)
+            
+            with open(temp_path, 'w') as f:
+                f.write('\n'.join(cleaned_lines))
+            
             # 原子性覆盖原文件
             shutil.move(temp_path, CONFIG_FILE)
-            log.info(f"✓ 配置已规范化（去重+排序）")
+            log.info(f"✓ 配置已规范化（去重+排序+格式清理）")
         except Exception as e:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
