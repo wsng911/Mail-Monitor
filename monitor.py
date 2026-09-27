@@ -1693,6 +1693,8 @@ def _normalize_config():
     old_json = json.dumps(config.get("accounts", []), sort_keys=True)
     new_json = json.dumps(new_accounts, sort_keys=True)
     
+    log.info(f"[DEBUG] 去重前 accounts 块数: {len(config.get('accounts', []))}, 去重后: {len(new_accounts)}")
+    
     if old_json != new_json:
         config["accounts"] = new_accounts
         
@@ -1712,7 +1714,7 @@ def _normalize_config():
             log.error(f"规范化失败: {e}")
             raise
     else:
-        log.info("配置已是规范状态")
+        log.info("配置已是规范状态，无需修改")
 
 
 def _save_outlook_account(refresh_token: str, email: str):
