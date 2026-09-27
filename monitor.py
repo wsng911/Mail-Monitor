@@ -1647,21 +1647,24 @@ def _exchange_code(code: str) -> tuple[str, str]:
     return d["refresh_token"], email
 
 
-def _deduplicate_config():
-    """去除配置中的重复账户（同 email + 同 type）"""
+def _normalize_config():
+    """启动时规范化配置：去重 + 排序 + 格式统一"""
     with open(CONFIG_FILE) as f:
-        lines = f.readlines()
+        config = yaml.safe_load(f)
     
-    # 解析配置
-    config = yaml.safe_load(''.join(lines))
     if not config or "accounts" not in config:
         return
     
-    # 去重：按 (type, email) 组合去重
-    seen = {}
+    # 第一步：按 type 分组并去重（同 type + 同 email 只保留一个）
+    accounts_by_type = {}
+    seen = {}  # (type, email) -> True
+    
     for account in config.get("accounts", []):
         acc_type = account.get("type", "")
         mailboxes = account.get("mailboxes", []) or []
+        
+        if acc_type not in accounts_by_type:
+            accounts_by_type[acc_type] = []
         
         unique_mbs = []
         for mb in mailboxes:
@@ -1671,235 +1674,104 @@ def _deduplicate_config():
                 seen[key] = True
                 unique_mbs.append(mb)
         
-        account["mailboxes"] = unique_mbs
+        if unique_mbs:
+            accounts_by_type[acc_type] = unique_mbs
     
-    # 重写配置
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-    
-    log.info("✓ 配置已去重")
-
-
-def _sort_accounts():
-    """按类型重新排序账户块（gmail → icloud → qq → outlook → others），保留原始格式"""
-    with open(CONFIG_FILE) as f:
-        lines = f.readlines()
-    
-    # 找到 accounts: 行
-    accounts_line = -1
-    for i, line in enumerate(lines):
-        if line.strip() == "accounts:":
-            accounts_line = i
-            break
-    
-    if accounts_line < 0:
-        return  # 没有 accounts 行
-    
-    # 从 accounts: 开始，找出所有 type 块
-    blocks = {}  # {type_name: block_lines}
+    # 第二步：按指定顺序重建 accounts 列表
     type_order = ["gmail", "icloud", "qq", "outlook", "others"]
+    new_accounts = []
     
-    i = accounts_line + 1
-    while i < len(lines):
-        line = lines[i]
-        match = re.match(r'^-\s+type:\s+(\w+)\s*$', line)
-        if match:
-            acc_type = match.group(1)
-            block_lines = [line]  # 从 - type: XXX 开始
-            i += 1
-            
-            # 收集直到下一个 - type: 或非缩进行
-            while i < len(lines):
-                next_line = lines[i]
-                # 如果是新的 type 块或非账户相关行，停止
-                if re.match(r'^-\s+type:', next_line):
-                    break
-                # 如果是非缩进的新字段（yaml 顶级），停止
-                if next_line.strip() and not next_line.startswith((' ', '\t')):
-                    break
-                block_lines.append(next_line)
-                i += 1
-            
-            blocks[acc_type] = block_lines
-        else:
-            i += 1
-    
-    # 重建配置：accounts: 前 + 排序后的 type 块 + accounts: 后的内容
-    new_content = lines[:accounts_line + 1]  # 包含 accounts:
-    
-    # 按指定顺序添加 type 块
     for acc_type in type_order:
-        if acc_type in blocks:
-            new_content.extend(blocks[acc_type])
+        if acc_type in accounts_by_type:
+            new_accounts.append({
+                "type": acc_type,
+                "mailboxes": accounts_by_type[acc_type]
+            })
     
-    # 添加最后一个块之后的内容（如果有）
-    # 找到第一个 type 块的起始行，之后的所有内容都属于 accounts 块
-    first_type_line = -1
-    for i in range(accounts_line + 1, len(lines)):
-        if re.match(r'^-\s+type:', lines[i]):
-            first_type_line = i
-            break
-    
-    if first_type_line >= 0:
-        # 找到 accounts 块的真正结束（最后一个 type 块之后）
-        last_type_end = accounts_line + 1
-        for acc_type in type_order:
-            if acc_type in blocks:
-                # blocks[acc_type] 中最后一行是什么，就从那里开始找
-                pass
-        
-        # 简单方法：最后一个块的结束位置 = len(new_content)
-        # 然后添加 new_content 之后的所有行
-        # 但这需要找到原始文件中最后一个 type 块的结束位置
-        
-        # 更简单：直接找原文件中最后一个 - type: 的位置，然后找它的块结束
-        for i in range(len(lines) - 1, -1, -1):
-            if re.match(r'^-\s+type:', lines[i]):
-                # 找这个块的结束
-                j = i + 1
-                while j < len(lines):
-                    if re.match(r'^-\s+type:', lines[j]) or (lines[j].strip() and not lines[j].startswith((' ', '\t'))):
-                        break
-                    j += 1
-                # j 就是 accounts 块的结束位置
-                if j < len(lines):
-                    new_content.extend(lines[j:])
-                break
-    
-    with open(CONFIG_FILE, "w") as f:
-        f.writelines(new_content)
-    log.info("✓ 账号已按类型重新排序")
+    # 第三步：如果有变化，重写配置文件
+    if new_accounts != config.get("accounts", []):
+        config["accounts"] = new_accounts
+        with open(CONFIG_FILE, "w") as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        log.info(f"✓ 配置已规范化（去重+排序）")
 
 
 def _save_outlook_account(refresh_token: str, email: str):
-    """保存 Outlook refresh_token 到对应的 type: outlook 分组"""
-    with open(CONFIG_FILE) as f:
-        lines = f.readlines()
-
-    content = ''.join(lines)
+    """保存 Outlook 账户到配置"""
+    config = yaml.safe_load(open(CONFIG_FILE))
     
-    # 先检查邮箱是否已存在
-    data = yaml.safe_load(content)
-    exists = False
-    for entry in data.get("accounts", []):
+    # 找 outlook 块
+    outlook_entry = None
+    for entry in config.get("accounts", []):
         if entry.get("type") == "outlook":
-            for mb in entry.get("mailboxes", []):
-                if mb.get("email") == email:
-                    exists = True
-                    break
-
-    if exists:
-        # 替换该邮箱对应的 refresh_token
-        import re as _re
-        pattern = rf'(email:\s*["\']?{_re.escape(email)}["\']?\s*\n\s+refresh_token:\s*)[^\n]+'
-        new_content = _re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
-        with open(CONFIG_FILE, "w") as f:
-            f.write(new_content)
-        return
-
-    # 不存在：找到 type: outlook 块的末尾，插入新账户
-    outlook_start = -1
-    outlook_end = -1
+            outlook_entry = entry
+            break
     
-    for i, line in enumerate(lines):
-        if re.match(r'^-\s+type:\s+outlook\s*$', line):
-            outlook_start = i
-        elif outlook_start >= 0 and outlook_end == -1:
-            # 找到第一个非缩进的行，标记为 outlook 块结束位置
-            if line.strip() and not line.startswith((' ', '\t')):
-                outlook_end = i
-                break
+    if outlook_entry is None:
+        outlook_entry = {"type": "outlook", "mailboxes": []}
+        config["accounts"].append(outlook_entry)
     
-    if outlook_end == -1:
-        outlook_end = len(lines)
+    # 检查邮箱是否已存在
+    mailboxes = outlook_entry.get("mailboxes", []) or []
+    exists = False
+    for mb in mailboxes:
+        if mb.get("email") == email:
+            mb["refresh_token"] = refresh_token  # 更新
+            exists = True
+            break
     
-    # 在 outlook 块末尾插入新账户
-    new_entry = f"  - label: \"{email}\"\n    email: \"{email}\"\n    refresh_token: \"{refresh_token}\"\n"
+    if not exists:
+        mailboxes.append({
+            "label": email,
+            "email": email,
+            "refresh_token": refresh_token
+        })
+        outlook_entry["mailboxes"] = mailboxes
     
-    if outlook_start >= 0:
-        # outlook 块存在，插入到末尾
-        lines.insert(outlook_end, new_entry)
-    else:
-        # outlook 块不存在，在末尾创建
-        if lines and not lines[-1].endswith('\n'):
-            lines.append('\n')
-        lines.append(f"- type: outlook\n  mailboxes:\n{new_entry}")
-    
+    # 保存配置
     with open(CONFIG_FILE, "w") as f:
-        f.writelines(lines)
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
     
-    # 重新排序账号（暂时禁用，排序逻辑需要修复）
-    # _sort_accounts()
+    log.info(f"✓ Outlook 账户已保存: {email}")
 
 
 def _save_gmail_token(email: str, refresh_token: str):
-    """保存 Gmail refresh_token 到 config.yaml，不破坏原有格式"""
-    with open(CONFIG_FILE) as f:
-        lines = f.readlines()
-
-    # 先尝试直接替换已有的 gmail_refresh_token 行（在对应 email 块内）
-    in_block = False
-    new_lines = []
-    replaced = False
-    for line in lines:
-        if re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
-            in_block = True
-        elif in_block and re.match(r'\s*-\s+\w', line) and 'email:' not in line:
-            in_block = False  # 进入下一个 mailbox 块
-        if in_block and not replaced and re.match(r'(\s*)gmail_refresh_token:', line):
-            indent = len(line) - len(line.lstrip())
-            new_lines.append(f'{" " * indent}gmail_refresh_token: "{refresh_token}"\n')
-            replaced = True
-            continue
-        new_lines.append(line)
-
-    if replaced:
-        with open(CONFIG_FILE, "w") as f:
-            f.writelines(new_lines)
-        return
-
-    # 没有找到已有字段，在 email: 行后插入
-    new_lines = []
-    inserted = False
-    for line in lines:
-        new_lines.append(line)
-        if not inserted and re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
-            indent = len(line) - len(line.lstrip())
-            new_lines.append(f'{" " * indent}gmail_refresh_token: "{refresh_token}"\n')
-            inserted = True
-
-    if not inserted:
-        # 找到 type: gmail 块的末尾插入，而不是追加到文件末尾
-        new_lines2 = []
-        gmail_block_end = -1
-        in_gmail = False
-        for idx, line in enumerate(new_lines):
-            if re.match(r'\s*-\s+type:\s*gmail', line):
-                in_gmail = True
-            elif in_gmail and re.match(r'\s*-\s+type:', line):
-                in_gmail = False  # 进入下一个 type 块
-            if in_gmail:
-                gmail_block_end = idx
-
-        new_entry_lines = (
-            f"      - email: \"{email}\"\n"
-            f"        label: \"{email}\"\n"
-            f"        gmail_refresh_token: \"{refresh_token}\"\n"
-        )
-        if gmail_block_end >= 0:
-            # 在 gmail 块末尾插入
-            new_lines.insert(gmail_block_end + 1, new_entry_lines)
-        else:
-            # gmail 块不存在，追加新块到末尾
-            content = "".join(new_lines)
-            content = content.rstrip() + "\n  - type: gmail\n    mailboxes:\n" + new_entry_lines
-            new_lines = [content]
-
-    with open(CONFIG_FILE, "w") as f:
-        f.writelines(new_lines)
+    """保存 Gmail 账户到配置"""
+    config = yaml.safe_load(open(CONFIG_FILE))
     
-    # 重新排序账号（暂时禁用，排序逻辑需要修复）
-    # _sort_accounts()
+    # 找 gmail 块
+    gmail_entry = None
+    for entry in config.get("accounts", []):
+        if entry.get("type") == "gmail":
+            gmail_entry = entry
+            break
+    
+    if gmail_entry is None:
+        gmail_entry = {"type": "gmail", "mailboxes": []}
+        config["accounts"].append(gmail_entry)
+    
+    # 检查邮箱是否已存在
+    mailboxes = gmail_entry.get("mailboxes", []) or []
+    exists = False
+    for mb in mailboxes:
+        if mb.get("email") == email:
+            mb["gmail_refresh_token"] = refresh_token  # 更新
+            exists = True
+            break
+    
+    if not exists:
+        mailboxes.append({
+            "label": email,
+            "email": email,
+            "gmail_refresh_token": refresh_token
+        })
+        gmail_entry["mailboxes"] = mailboxes
+    
+    # 保存配置
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+    
+    log.info(f"✓ Gmail 账户已保存: {email}")
 
 
 def start_oauth_server():
@@ -1914,10 +1786,8 @@ def main():
         t = threading.Thread(target=start_oauth_server, daemon=True)
         t.start()
 
-    # 启动时：先去重
-    _deduplicate_config()
-    # 排序逻辑暂时禁用，等修复完成
-    # _sort_accounts()
+    # 启动时：规范化配置（去重+排序+格式统一）
+    _normalize_config()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
