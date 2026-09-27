@@ -1914,6 +1914,10 @@ def main():
         t = threading.Thread(target=start_oauth_server, daemon=True)
         t.start()
 
+    # 启动时：先去重，再排序
+    _deduplicate_config()
+    _sort_accounts()
+
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
     accounts = []
@@ -1924,19 +1928,7 @@ def main():
         else:
             accounts.append(entry)
 
-    # 去重：同邮箱+同type只保留一条（保留第一条）
-    seen = {}
-    for acc in accounts:
-        key = (acc.get("email", ""), acc.get("type", ""))
-        if key not in seen:
-            seen[key] = acc
-    accounts = list(seen.values())
-    
-    # 如果去重后数量变少，说明有重复，需要重写配置文件
-    new_count = len(accounts)
-    if new_count != len(raw):
-        log.warning(f"检测到重复账户，去重前: {len(raw)} 条，去重后: {new_count} 条，正在修复配置...")
-        _deduplicate_config()
+    log.info(f"加载 {len(accounts)} 个账号")
 
     # 启动通知
     send_tg("✅ Mail Monitor 已启动")
