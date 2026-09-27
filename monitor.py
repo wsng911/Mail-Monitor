@@ -1792,9 +1792,6 @@ def _save_outlook_account(refresh_token: str, email: str):
     
     with open(CONFIG_FILE, "w") as f:
         f.writelines(lines)
-    
-    # 重新排序账号
-    _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1821,7 +1818,6 @@ def _save_gmail_token(email: str, refresh_token: str):
     if replaced:
         with open(CONFIG_FILE, "w") as f:
             f.writelines(new_lines)
-        _sort_accounts()
         return
 
     # 没有找到已有字段，在 email: 行后插入
@@ -1863,7 +1859,6 @@ def _save_gmail_token(email: str, refresh_token: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
-    _sort_accounts()
 
 
 def start_oauth_server():
