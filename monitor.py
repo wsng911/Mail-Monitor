@@ -1722,28 +1722,55 @@ def _normalize_config():
             with os.fdopen(temp_fd, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
             
-            # 清理 yaml.dump 产生的列表项之间的空行
+            # 格式化 YAML：清理 mailboxes 内部空行，保留 type 之间的单个空行
             with open(temp_path, 'r') as f:
-                content = f.read()
+                lines = f.readlines()
             
-            # 删除 mailboxes 下列表项之间的空行（但保留 accounts 顶级之间的空行）
-            lines = content.split('\n')
             cleaned_lines = []
             in_mailboxes = False
+            last_was_blank = False
+            last_was_type_marker = False
+            
             for i, line in enumerate(lines):
-                if line.strip().startswith('mailboxes:'):
+                stripped = line.rstrip('\n')
+                
+                # 检测是否在 mailboxes 块中
+                if stripped.strip().startswith('mailboxes:'):
                     in_mailboxes = True
-                elif line.startswith('- type:') or (line.strip() and not line.startswith(' ')):
+                    last_was_type_marker = False
+                elif stripped.startswith('- type:'):
                     in_mailboxes = False
+                    last_was_type_marker = True
                 
-                # 删除 mailboxes 下的空行，但保留其他地方的空行
-                if in_mailboxes and line.strip() == '' and cleaned_lines and cleaned_lines[-1].strip() == '':
-                    continue
-                
-                cleaned_lines.append(line)
+                # 处理空行
+                if stripped.strip() == '':
+                    # mailboxes 内部：不要任何空行
+                    if in_mailboxes:
+                        continue
+                    # type 之间：最多保留一个空行（在 type marker 之后）
+                    if last_was_blank:
+                        continue
+                    # type marker 之后的空行不要，在其他地方可以保留
+                    if last_was_type_marker:
+                        continue
+                    last_was_blank = True
+                    cleaned_lines.append(line)
+                else:
+                    # 非空行：如果前面不是 type marker，在上一个 type 块和新 type 块之间加空行
+                    if last_was_type_marker and stripped.startswith('  mailboxes:'):
+                        # type 到 mailboxes 之间不加空行
+                        pass
+                    elif stripped.startswith('- type:') and cleaned_lines and cleaned_lines[-1].rstrip('\n').strip() != '':
+                        # 新 type marker 前加空行
+                        if cleaned_lines[-1].rstrip('\n').strip() != '':
+                            cleaned_lines.append('\n')
+                    
+                    last_was_blank = False
+                    last_was_type_marker = False
+                    cleaned_lines.append(line)
             
             with open(temp_path, 'w') as f:
-                f.write('\n'.join(cleaned_lines))
+                f.writelines(cleaned_lines)
             
             # 原子性覆盖原文件
             shutil.move(temp_path, CONFIG_FILE)
