@@ -1609,9 +1609,12 @@ def _exchange_code(code: str) -> tuple[str, str]:
 
 
 def _sort_accounts():
-    """按类型重新排序账户，相同 type 合并到一个块"""
+    """按类型重新排序账户，相同 type 合并到一个块，保持原格式"""
     with open(CONFIG_FILE) as f:
-        config = yaml.safe_load(f)
+        content = f.read()
+    
+    # 用 YAML 解析获取数据
+    config = yaml.safe_load(content)
     
     # 按 type 分组
     accounts_by_type = {}
@@ -1638,8 +1641,14 @@ def _sort_accounts():
     
     config["accounts"] = new_accounts
     
+    # 保存为 YAML，保持紧凑格式但可读
+    from io import StringIO
+    output = StringIO()
+    yaml.dump(config, output, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    new_content = output.getvalue()
+    
     with open(CONFIG_FILE, "w") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        f.write(new_content)
 
 
 def _save_outlook_account(refresh_token: str, email: str):
