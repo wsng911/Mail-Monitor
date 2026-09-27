@@ -1598,20 +1598,52 @@ def _exchange_code(code: str) -> tuple[str, str]:
         raise RuntimeError(d.get("error_description", d))
     # 用 access_token 获取邮箱地址
     email = ""
+    upn = ""
     try:
         me = httpx.get("https://graph.microsoft.com/v1.0/me",
                        headers={"Authorization": f"Bearer {d['access_token']}"},
                        params={"$select": "mail,userPrincipalName"}, timeout=10)
         me_data = me.json()
-        email = me_data.get("mail") or me_data.get("userPrincipalName", "")
-        if not email:
-            log.warning(f"Outlook API 返回的用户信息中没有邮箱地址：{me_data}")
-            raise RuntimeError("无法获取邮箱地址，账户可能被禁用或未配置邮箱")
+        email = me_data.get("mail") or ""
+        upn = me_data.get("userPrincipalName", "")
+        
+        if not email and not upn:
+            log.warning(f"Outlook API 返回的用户信息中没有邮箱地址或 UPN：{me_data}")
+            # 尝试备用方案：检查是否有邮件文件夹
+            try:
+                folders = httpx.get("https://graph.microsoft.com/v1.0/me/mailFolders?$top=1",
+                                   headers={"Authorization": f"Bearer {d['access_token']}"}, 
+                                   timeout=10)
+                if folders.status_code == 200:
+                    # 有邮件文件夹说明账户有邮箱，用 upn 作为标识
+                    if upn:
+                        email = upn
+                        log.info(f"使用 UPN 作为账户标识：{email}")
+                    else:
+                        raise RuntimeError("无法获取账户标识（mail 和 UPN 都为空）")
+                else:
+                    raise RuntimeError(f"无法验证邮箱：mailFolders 查询返回 {folders.status_code}")
+            except Exception as e:
+                log.warning(f"备用方案失败：{e}")
+                if upn:
+                    email = upn
+                    log.info(f"降级：使用 UPN 作为账户标识：{email}")
+                else:
+                    raise RuntimeError("无法获取邮箱地址或账户标识")
+        elif not email and upn:
+            # 有 UPN 但没 mail 字段，用 UPN
+            email = upn
+            log.info(f"没有 mail 字段，使用 UPN：{email}")
     except Exception as e:
-        if "无法获取" in str(e):
+        if "无法获取" in str(e) or "无法验证" in str(e):
             raise
-        log.warning(f"获取 Outlook 邮箱地址失败：{e}")
-        pass
+        log.warning(f"获取 Outlook 邮箱地址异常：{e}")
+        if upn:
+            email = upn
+            log.info(f"异常降级：使用 UPN 作为账户标识：{email}")
+        else:
+            raise RuntimeError(f"无法获取邮箱地址：{e}")
+    
     return d["refresh_token"], email
 
 
