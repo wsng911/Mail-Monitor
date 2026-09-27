@@ -1743,6 +1743,9 @@ def main():
     accounts = list(seen.values())
     log.info(f"加载 {len(accounts)} 个账号")
 
+    # 域名变更通知
+    send_tg("✅ Mail Monitor 已启动\\n\\n🔄 **域名已更新**：`idays.gq` → `idays.eu.org`\\n确保 DNS 和 SSL 证书已更新。OAuth 回调地址已自动更新。")
+
     def _group(t):
         items = [a for a in accounts if a.get("type","").lower()==t and a.get("email")]
         return items, "\n".join(f"`{a['email']}`" for a in items)
@@ -1806,9 +1809,10 @@ def main():
             "回调：`https://oa.idays.eu.org/api/gmail/oauth/callback`",
         ]),
         ("重装后操作", [
-            "1\\. Pub/Sub 订阅无需重建，域名验证永久有效",
-            "2\\. 重新授权各账号：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
-            "3\\. 如积压旧消息：[清除消息](https://console.cloud.google.com/cloudpubsub/subscription/detail/gmail-push-sub?project=mail-monitor-493615) → 完全清除",
+            "1\\. 若域名变更，更新 [Pub/Sub 订阅端点](https://console.cloud.google.com/cloudpubsub/subscription/detail/gmail-push-sub?project=mail-monitor-493615) 为新地址",
+            "2\\. Pub/Sub 订阅无需重建，域名验证永久有效",
+            "3\\. 重新授权各账号：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
+            "4\\. 如积压旧消息：[清除消息](https://console.cloud.google.com/cloudpubsub/subscription/detail/gmail-push-sub?project=mail-monitor-493615) → 完全清除",
         ]),
     ]))
 
@@ -1816,7 +1820,7 @@ def main():
         ("Azure 应用注册", [
             "地址：`portal.azure.com`",
             "应用名：`imail`",
-            "应用 ID：`2e6ee5ed-2fb6-454c-8e1b-a5515b78571b`",
+            "应用 ID：`158552b8-f9d5-49b7-b380-4c8fad01720e`",
         ]),
         ("重定向 URI", [
             "类型：移动和桌面应用程序",
@@ -1831,9 +1835,10 @@ def main():
             "订阅有效期：3 天，程序自动续期",
         ]),
         ("重装后操作", [
-            "1. 点 Outlook Push 授权链接重新授权各账号",
-            "2. 授权后自动注册 Change Notifications 订阅",
-            "3. client_secret 到期需去 Azure 重新生成并更新 config",
+            "1. 更新 `config.yaml` 中的 `redirect_uri` 为新域名（若域名变更）",
+            "2. 点 Outlook Push 授权链接重新授权各账号",
+            "3. 授权后自动注册 Change Notifications 订阅",
+            "4. 如需创建新应用：client_id 和 client_secret 需更新",
         ]),
     ]))
 
