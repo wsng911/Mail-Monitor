@@ -1608,6 +1608,40 @@ def _exchange_code(code: str) -> tuple[str, str]:
     return d["refresh_token"], email
 
 
+def _sort_accounts():
+    """按类型重新排序账户，相同 type 合并到一个块"""
+    with open(CONFIG_FILE) as f:
+        config = yaml.safe_load(f)
+    
+    # 按 type 分组
+    accounts_by_type = {}
+    for account in config.get("accounts", []):
+        acc_type = account.get("type")
+        if not acc_type:
+            continue
+        
+        mailboxes = [mb for mb in account.get("mailboxes", []) if mb.get("email")]
+        if not mailboxes:
+            continue
+        
+        if acc_type not in accounts_by_type:
+            accounts_by_type[acc_type] = {"type": acc_type, "mailboxes": []}
+        
+        accounts_by_type[acc_type]["mailboxes"].extend(mailboxes)
+    
+    # 按顺序重建
+    type_order = ["qq", "gmail", "icloud", "outlook", "others"]
+    new_accounts = []
+    for t in type_order:
+        if t in accounts_by_type:
+            new_accounts.append(accounts_by_type[t])
+    
+    config["accounts"] = new_accounts
+    
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+
+
 def _save_outlook_account(refresh_token: str, email: str):
     """更新已有账号的 token，不存在则追加"""
     with open(CONFIG_FILE) as f:
@@ -1645,6 +1679,9 @@ def _save_outlook_account(refresh_token: str, email: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.write(content)
+    
+    # 重新排序账户
+    _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1712,6 +1749,9 @@ def _save_gmail_token(email: str, refresh_token: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
+    
+    # 重新排序账户
+    _sort_accounts()
 
 
 def start_oauth_server():
