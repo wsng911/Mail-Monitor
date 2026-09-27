@@ -1586,11 +1586,11 @@ def _exchange_code(code: str) -> tuple[str, str]:
         "code":         code,
         "redirect_uri": OAUTH_REDIRECT,
         "scope":        "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/User.Read offline_access",
-        "token_endpoint_auth_method": "none",
     }
     if OAUTH_CLIENT_SECRET:
         data["client_secret"] = OAUTH_CLIENT_SECRET
-        data.pop("token_endpoint_auth_method", None)
+    else:
+        data["token_endpoint_auth_method"] = "none"
     r = httpx.post(OUTLOOK_TOKEN_URL, data=data, timeout=15)
     d = r.json()
     if "refresh_token" not in d:
