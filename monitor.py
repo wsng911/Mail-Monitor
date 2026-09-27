@@ -1699,8 +1699,11 @@ def _normalize_config():
                 "mailboxes": accounts_by_type[acc_type]
             })
     
-    # 第三步：如果有变化，写入临时文件，然后原子性覆盖
+    # 第三步：如果有变化，或者格式不规范，都需要重写
     import json
+    import tempfile
+    import shutil
+    
     old_json = json.dumps(config.get("accounts", []), sort_keys=True)
     new_json = json.dumps(new_accounts, sort_keys=True)
     
@@ -1710,8 +1713,17 @@ def _normalize_config():
     log.info(f"[DEBUG] 去重前: {len(config.get('accounts', []))} 块, {old_count} 个账户")
     log.info(f"[DEBUG] 去重后: {len(new_accounts)} 块, {new_count} 个账户")
     
-    if old_json != new_json:
-        log.info(f"[DEBUG] 配置结构已改变，准备重写")
+    # 检查配置格式是否规范（检查是否有多余空行）
+    with open(CONFIG_FILE, 'r') as f:
+        file_content = f.read()
+    needs_format_fix = '\n\n\n' in file_content or '\n  \n' in file_content  # 多余空行
+    
+    if old_json != new_json or needs_format_fix:
+        if old_json != new_json:
+            log.info(f"[DEBUG] 配置结构已改变，准备重写")
+        if needs_format_fix:
+            log.info(f"[DEBUG] 配置格式不规范，准备修复")
+        
         config["accounts"] = new_accounts
         
         # 写入临时文件
