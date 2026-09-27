@@ -1692,86 +1692,98 @@ def _normalize_config():
     if new_accounts != config.get("accounts", []):
         config["accounts"] = new_accounts
         with open(CONFIG_FILE, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
         log.info(f"✓ 配置已规范化（去重+排序）")
 
 
 def _save_outlook_account(refresh_token: str, email: str):
-    """保存 Outlook 账户到配置"""
-    config = yaml.safe_load(open(CONFIG_FILE))
+    """保存 Outlook 账户到配置（追加方式，不重写）"""
+    with open(CONFIG_FILE) as f:
+        content = f.read()
     
-    # 找 outlook 块
-    outlook_entry = None
+    config = yaml.safe_load(content)
+    
+    # 找 outlook 块中是否已存在
+    exists = False
     for entry in config.get("accounts", []):
         if entry.get("type") == "outlook":
-            outlook_entry = entry
+            for mb in entry.get("mailboxes", []):
+                if mb.get("email") == email:
+                    # 已存在，用正则替换 token
+                    pattern = rf'(email:\s*["\']?{re.escape(email)}["\']?\s*\n\s+refresh_token:\s*)[^\n]+'
+                    new_content = re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
+                    with open(CONFIG_FILE, "w") as f:
+                        f.write(new_content)
+                    log.info(f"✓ Outlook 账户已更新: {email}")
+                    return
+    
+    # 不存在，追加到 outlook 块末尾
+    lines = content.split('\n')
+    outlook_start = -1
+    outlook_end = -1
+    
+    for i, line in enumerate(lines):
+        if re.match(r'^-\s+type:\s+outlook\s*$', line):
+            outlook_start = i
+        elif outlook_start >= 0 and outlook_end == -1 and line.strip() and not line.startswith((' ', '\t')):
+            outlook_end = i
             break
     
-    if outlook_entry is None:
-        outlook_entry = {"type": "outlook", "mailboxes": []}
-        config["accounts"].append(outlook_entry)
+    if outlook_end == -1:
+        outlook_end = len(lines)
     
-    # 检查邮箱是否已存在
-    mailboxes = outlook_entry.get("mailboxes", []) or []
-    exists = False
-    for mb in mailboxes:
-        if mb.get("email") == email:
-            mb["refresh_token"] = refresh_token  # 更新
-            exists = True
-            break
-    
-    if not exists:
-        mailboxes.append({
-            "label": email,
-            "email": email,
-            "refresh_token": refresh_token
-        })
-        outlook_entry["mailboxes"] = mailboxes
-    
-    # 保存配置
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-    
-    log.info(f"✓ Outlook 账户已保存: {email}")
+    if outlook_start >= 0:
+        # 在 outlook 块末尾插入
+        new_entry = f"\n  - label: \"{email}\"\n    email: \"{email}\"\n    refresh_token: \"{refresh_token}\""
+        lines.insert(outlook_end, new_entry)
+        with open(CONFIG_FILE, "w") as f:
+            f.write('\n'.join(lines))
+        log.info(f"✓ Outlook 账户已添加: {email}")
 
 
 def _save_gmail_token(email: str, refresh_token: str):
-    """保存 Gmail 账户到配置"""
-    config = yaml.safe_load(open(CONFIG_FILE))
+    """保存 Gmail 账户到配置（追加方式，不重写）"""
+    with open(CONFIG_FILE) as f:
+        content = f.read()
     
-    # 找 gmail 块
-    gmail_entry = None
+    config = yaml.safe_load(content)
+    
+    # 找 gmail 块中是否已存在
+    exists = False
     for entry in config.get("accounts", []):
         if entry.get("type") == "gmail":
-            gmail_entry = entry
+            for mb in entry.get("mailboxes", []):
+                if mb.get("email") == email:
+                    # 已存在，用正则替换 token
+                    pattern = rf'(email:\s*["\']?{re.escape(email)}["\']?\s*\n\s+gmail_refresh_token:\s*)[^\n]+'
+                    new_content = re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
+                    with open(CONFIG_FILE, "w") as f:
+                        f.write(new_content)
+                    log.info(f"✓ Gmail 账户已更新: {email}")
+                    return
+    
+    # 不存在，追加到 gmail 块末尾
+    lines = content.split('\n')
+    gmail_start = -1
+    gmail_end = -1
+    
+    for i, line in enumerate(lines):
+        if re.match(r'^-\s+type:\s+gmail\s*$', line):
+            gmail_start = i
+        elif gmail_start >= 0 and gmail_end == -1 and line.strip() and not line.startswith((' ', '\t')):
+            gmail_end = i
             break
     
-    if gmail_entry is None:
-        gmail_entry = {"type": "gmail", "mailboxes": []}
-        config["accounts"].append(gmail_entry)
+    if gmail_end == -1:
+        gmail_end = len(lines)
     
-    # 检查邮箱是否已存在
-    mailboxes = gmail_entry.get("mailboxes", []) or []
-    exists = False
-    for mb in mailboxes:
-        if mb.get("email") == email:
-            mb["gmail_refresh_token"] = refresh_token  # 更新
-            exists = True
-            break
-    
-    if not exists:
-        mailboxes.append({
-            "label": email,
-            "email": email,
-            "gmail_refresh_token": refresh_token
-        })
-        gmail_entry["mailboxes"] = mailboxes
-    
-    # 保存配置
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-    
-    log.info(f"✓ Gmail 账户已保存: {email}")
+    if gmail_start >= 0:
+        # 在 gmail 块末尾插入
+        new_entry = f"\n  - label: \"{email}\"\n    email: \"{email}\"\n    gmail_refresh_token: \"{refresh_token}\""
+        lines.insert(gmail_end, new_entry)
+        with open(CONFIG_FILE, "w") as f:
+            f.write('\n'.join(lines))
+        log.info(f"✓ Gmail 账户已添加: {email}")
 
 
 def start_oauth_server():
@@ -1787,7 +1799,8 @@ def main():
         t.start()
 
     # 启动时：规范化配置（去重+排序+格式统一）
-    _normalize_config()
+    # 暂时禁用，调试中
+    # _normalize_config()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
