@@ -1869,8 +1869,8 @@ def main():
     send_tg(_make_guide("📋 Outlook Push 配置备忘", [
         ("Azure 应用注册", [
             "地址：`portal.azure.com`",
-            "应用名：`imail`",
-            "应用 ID：`158552b8-f9d5-49b7-b380-4c8fad01720e`",
+            "应用名：`mail-monitor-consumer`",
+            "应用 ID：`2b7e0045-0663-449f-9ab5-d6fe3f8d77ad`",
         ]),
         ("重定向 URI", [
             "类型：移动和桌面应用程序",
