@@ -1616,46 +1616,92 @@ def _exchange_code(code: str) -> tuple[str, str]:
 
 
 def _sort_accounts():
-    """按类型重新排序账户，相同 type 合并到一个块，保持原格式"""
+    """按类型重新排序账户（gmail → icloud → qq → outlook → others），保留格式"""
     with open(CONFIG_FILE) as f:
         content = f.read()
     
-    # 用 YAML 解析获取数据
+    # 用 YAML 安全解析获取账号数据
     config = yaml.safe_load(content)
+    if not config or "accounts" not in config:
+        return
     
-    # 按 type 分组
+    # 按 type 分组账号，保留 mailbox 原始数据
     accounts_by_type = {}
     for account in config.get("accounts", []):
-        acc_type = account.get("type")
+        acc_type = account.get("type", "").lower()
         if not acc_type:
             continue
-        
-        mailboxes = [mb for mb in account.get("mailboxes", []) if mb.get("email")]
+        mailboxes = account.get("mailboxes", [])
         if not mailboxes:
             continue
-        
         if acc_type not in accounts_by_type:
-            accounts_by_type[acc_type] = {"type": acc_type, "mailboxes": []}
+            accounts_by_type[acc_type] = []
+        accounts_by_type[acc_type].extend(mailboxes)
+    
+    # 按指定顺序重建 accounts 块内容
+    type_order = ["gmail", "icloud", "qq", "outlook", "others"]
+    new_accounts_lines = []
+    
+    for idx, acc_type in enumerate(type_order):
+        if acc_type not in accounts_by_type:
+            continue
         
-        accounts_by_type[acc_type]["mailboxes"].extend(mailboxes)
+        # 类型块间空行分隔
+        if idx > 0 and new_accounts_lines:
+            new_accounts_lines.append("")
+        
+        new_accounts_lines.append(f"- type: {acc_type}")
+        new_accounts_lines.append("  mailboxes:")
+        
+        # 添加该类型的所有 mailbox
+        for mb in accounts_by_type[acc_type]:
+            # 按字段顺序输出（label first, email second, then others）
+            field_order = ["label", "email", "apple_id", "app_pass", "gmail_refresh_token", "refresh_token"]
+            for key in field_order:
+                if key not in mb or mb[key] is None:
+                    continue
+                val = mb[key]
+                # 所有字符串值加引号
+                if isinstance(val, str):
+                    val_str = f'"{val}"'
+                else:
+                    val_str = str(val)
+                
+                if key == "label":
+                    new_accounts_lines.append(f"  - label: {val_str}")
+                else:
+                    new_accounts_lines.append(f"    {key}: {val_str}")
     
-    # 按顺序重建
-    type_order = ["qq", "gmail", "icloud", "outlook", "others"]
-    new_accounts = []
-    for t in type_order:
-        if t in accounts_by_type:
-            new_accounts.append(accounts_by_type[t])
+    # 找到原文件中 accounts: 的位置和范围
+    lines = content.split('\n')
+    accounts_start = -1
+    accounts_end = len(lines)
     
-    config["accounts"] = new_accounts
+    for i, line in enumerate(lines):
+        if line.strip() == "accounts:":
+            accounts_start = i
+        elif accounts_start >= 0 and accounts_end == len(lines):
+            # 找到第一个非缩进行（新的顶级字段或文件结尾）
+            if line and line[0] not in (' ', '\t', '-') and ':' in line:
+                accounts_end = i
+                break
     
-    # 保存为 YAML，保持紧凑格式但可读
-    from io import StringIO
-    output = StringIO()
-    yaml.dump(config, output, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    new_content = output.getvalue()
+    if accounts_start < 0:
+        return  # 没有找到 accounts 块
+    
+    # 重建配置文件
+    before = '\n'.join(lines[:accounts_start + 1])  # 包含 accounts: 行
+    after = '\n'.join(lines[accounts_end:]) if accounts_end < len(lines) else ""
+    
+    new_content = before + '\n' + '\n'.join(new_accounts_lines)
+    if after:
+        new_content += '\n' + after
+    else:
+        new_content += '\n'
     
     with open(CONFIG_FILE, "w") as f:
         f.write(new_content)
+    log.info("✓ 账号已按类型重新排序")
 
 
 def _save_outlook_account(refresh_token: str, email: str):
@@ -1695,6 +1741,9 @@ def _save_outlook_account(refresh_token: str, email: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.write(content)
+    
+    # 重新排序账号
+    _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1721,6 +1770,7 @@ def _save_gmail_token(email: str, refresh_token: str):
     if replaced:
         with open(CONFIG_FILE, "w") as f:
             f.writelines(new_lines)
+        _sort_accounts()
         return
 
     # 没有找到已有字段，在 email: 行后插入
@@ -1762,6 +1812,7 @@ def _save_gmail_token(email: str, refresh_token: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
+    _sort_accounts()
 
 
 def start_oauth_server():
@@ -1842,6 +1893,7 @@ def main():
     send_tg(_make_guide("📋 Gmail Push 配置备忘", [
         ("➕ 新增邮箱账号", [
             "第一步：[GCP 添加测试用户](https://console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615)",
+            "  测试邮箱：`ichliebedich.mygirl@gmail.com`",
             "第二步：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
         ]),
         ("🔧 新建 Pub/Sub（首次或重建）", [
@@ -1869,6 +1921,7 @@ def main():
     send_tg(_make_guide("📋 Outlook Push 配置备忘", [
         ("Azure 应用注册", [
             "地址：`portal.azure.com`",
+            "登录账户：`mrlees2026@hotmail.com`",
             "应用名：`mail-monitor-consumer`",
             "应用 ID：`2b7e0045-0663-449f-9ab5-d6fe3f8d77ad`",
         ]),
