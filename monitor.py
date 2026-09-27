@@ -1688,9 +1688,6 @@ def _save_outlook_account(refresh_token: str, email: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.write(content)
-    
-    # 重新排序账户
-    _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1758,9 +1755,6 @@ def _save_gmail_token(email: str, refresh_token: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
-    
-    # 重新排序账户
-    _sort_accounts()
 
 
 def start_oauth_server():
