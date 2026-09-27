@@ -39,7 +39,7 @@ FORWARD_ALL   = cfg.get("forward_all", False)
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
 OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "7feada80-d946-4d06-b134-73afa3524fb7")
 OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")
-OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.gq/api/emails/oauth/outlook/callback")
+OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.eu.org/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
 # Gmail Push 配置
@@ -1507,7 +1507,7 @@ class OAuthHandler(BaseHTTPRequestHandler):
         # Gmail 授权入口
         elif parsed.path == "/auth/gmail":
             params = parse_qs(parsed.query)
-            redirect = f"https://oa.idays.gq/api/gmail/oauth/callback"
+            redirect = f"https://oa.idays.eu.org/api/gmail/oauth/callback"
             url = (f"{GMAIL_AUTH_URL}?client_id={GMAIL_CLIENT_ID}"
                    f"&redirect_uri={redirect}&response_type=code"
                    f"&scope={GMAIL_SCOPES.replace(' ', '%20')}"
@@ -1522,7 +1522,7 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 self._respond(400, "缺少 code 参数")
                 return
             try:
-                redirect = f"https://oa.idays.gq/api/gmail/oauth/callback"
+                redirect = f"https://oa.idays.eu.org/api/gmail/oauth/callback"
                 r = httpx.post(GMAIL_TOKEN_URL, data={
                     "client_id": GMAIL_CLIENT_ID,
                     "client_secret": GMAIL_CLIENT_SECRET,
@@ -1789,7 +1789,7 @@ def main():
     send_tg(_make_guide("📋 Gmail Push 配置备忘", [
         ("➕ 新增邮箱账号", [
             "第一步：[GCP 添加测试用户](https://console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615)",
-            "第二步：[Gmail Push 授权](https://oa.idays.gq/auth/gmail)",
+            "第二步：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
         ]),
         ("🔧 新建 Pub/Sub（首次或重建）", [
             "1\\. 打开 [Pub/Sub 主题页](https://console.cloud.google.com/cloudpubsub/topic/list?project=mail-monitor-493615) → 创建主题",
@@ -1797,17 +1797,17 @@ def main():
             "3\\. 进入主题 → 权限 → 添加主账号：`gmail-api-push@system.gserviceaccount.com`，角色：Pub/Sub 发布者",
             "4\\. 打开 [订阅页](https://console.cloud.google.com/cloudpubsub/subscription/list?project=mail-monitor-493615) → 创建订阅",
             "5\\. 订阅 ID：`gmail-push-sub`，主题：`gmail-push`，类型：推送",
-            "6\\. 端点：`https://oa.idays.gq/api/gmail/push` → 创建",
+            "6\\. 端点：`https://oa.idays.eu.org/api/gmail/push` → 创建",
         ]),
         ("📋 配置信息", [
             "项目：`mail-monitor-493615`",
             "Topic：`projects/mail-monitor-493615/topics/gmail-push`",
             "客户端 ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`",
-            "回调：`https://oa.idays.gq/api/gmail/oauth/callback`",
+            "回调：`https://oa.idays.eu.org/api/gmail/oauth/callback`",
         ]),
         ("重装后操作", [
             "1\\. Pub/Sub 订阅无需重建，域名验证永久有效",
-            "2\\. 重新授权各账号：[Gmail Push 授权](https://oa.idays.gq/auth/gmail)",
+            "2\\. 重新授权各账号：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
             "3\\. 如积压旧消息：[清除消息](https://console.cloud.google.com/cloudpubsub/subscription/detail/gmail-push-sub?project=mail-monitor-493615) → 完全清除",
         ]),
     ]))
@@ -1820,14 +1820,14 @@ def main():
         ]),
         ("重定向 URI", [
             "类型：移动和桌面应用程序",
-            "地址：`https://oa.idays.gq/api/emails/oauth/outlook/callback`",
+            "地址：`https://oa.idays.eu.org/api/emails/oauth/outlook/callback`",
         ]),
         ("API 权限", [
             "`Mail.Read` / `Mail.ReadWrite` / `User.Read` / `offline_access`",
             "允许公共客户端流：已启用",
         ]),
         ("Change Notifications 端点", [
-            "`https://oa.idays.gq/api/outlook/push`",
+            "`https://oa.idays.eu.org/api/outlook/push`",
             "订阅有效期：3 天，程序自动续期",
         ]),
         ("重装后操作", [
