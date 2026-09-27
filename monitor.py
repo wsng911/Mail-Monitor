@@ -37,8 +37,8 @@ FORWARD_ALL   = cfg.get("forward_all", False)
 
 # OAuth2 回调服务配置
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
-OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "7feada80-d946-4d06-b134-73afa3524fb7")
-OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")
+OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "8c66bce8-c8a3-4b75-8120-58e307a85a3e")
+OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")  # 公开客户端不使用 secret
 OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.eu.org/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
@@ -1499,7 +1499,7 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 _save_outlook_account(rt, email)
                 email_display = email or "（未获取到邮箱地址）"
                 self._respond(200, f"✅ 授权成功！{email_display} 已添加，监控将在下一轮询周期生效。")
-                send_tg(f"✅ Outlook 账号已授权：{email_display}")
+                send_tg(f"✅ Outlook 账号已授权：`{_esc(email_display)}`")
                 log.info(f"新 Outlook 账号授权成功：{email}")
             except Exception as e:
                 self._respond(500, f"授权失败: {e}")
@@ -1954,8 +1954,8 @@ def main():
         ("Azure 应用注册", [
             "地址：`portal.azure.com`",
             "登录账户：`mrlees2026@hotmail.com`",
-            "应用名：`mail-monitor-consumer`",
-            "应用 ID：`2b7e0045-0663-449f-9ab5-d6fe3f8d77ad`",
+            "应用名：`mail-monitor`",
+            "应用 ID：`8c66bce8-c8a3-4b75-8120-58e307a85a3e`",
         ]),
         ("重定向 URI", [
             "类型：移动和桌面应用程序",
@@ -1963,17 +1963,17 @@ def main():
         ]),
         ("API 权限", [
             "`Mail.Read` / `Mail.ReadWrite` / `User.Read` / `offline_access`",
-            "允许公共客户端流：已启用",
+            "允许公共客户端流：已禁用",
         ]),
         ("Change Notifications 端点", [
             "`https://oa.idays.eu.org/api/outlook/push`",
             "订阅有效期：3 天，程序自动续期",
         ]),
         ("重装后操作", [
-            "1. 更新 `config.yaml` 中的 `redirect_uri` 为新域名（若域名变更）",
-            "2. 点 Outlook Push 授权链接重新授权各账号",
-            "3. 授权后自动注册 Change Notifications 订阅",
-            "4. 如需创建新应用：client_id 和 client_secret 需更新",
+            "1\\. 更新 `config.yaml` 中的 `redirect_uri` 为新域名（若域名变更）",
+            "2\\. 点 Outlook Push 授权链接重新授权各账号",
+            "3\\. 授权后自动注册 Change Notifications 订阅",
+            "4\\. 如需创建新应用：应用 ID 需更新（client_secret 不需要）",
         ]),
     ]))
 
