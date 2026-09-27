@@ -1606,7 +1606,11 @@ def _exchange_code(code: str) -> tuple[str, str]:
         email = me_data.get("mail") or me_data.get("userPrincipalName", "")
         if not email:
             log.warning(f"Outlook API 返回的用户信息中没有邮箱地址：{me_data}")
-    except Exception:
+            raise RuntimeError("无法获取邮箱地址，账户可能被禁用或未配置邮箱")
+    except Exception as e:
+        if "无法获取" in str(e):
+            raise
+        log.warning(f"获取 Outlook 邮箱地址失败：{e}")
         pass
     return d["refresh_token"], email
 
