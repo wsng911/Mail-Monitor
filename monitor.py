@@ -1648,91 +1648,72 @@ def _exchange_code(code: str) -> tuple[str, str]:
 
 
 def _sort_accounts():
-    """按类型重新排序账户（gmail → icloud → qq → outlook → others），保留格式"""
+    """按类型重新排序账户块（gmail → icloud → qq → outlook → others），保留原始格式"""
     with open(CONFIG_FILE) as f:
-        content = f.read()
+        lines = f.readlines()
     
-    # 用 YAML 安全解析获取账号数据
-    config = yaml.safe_load(content)
-    if not config or "accounts" not in config:
-        return
-    
-    # 按 type 分组账号，保留 mailbox 原始数据
-    accounts_by_type = {}
-    for account in config.get("accounts", []):
-        acc_type = account.get("type", "").lower()
-        if not acc_type:
-            continue
-        mailboxes = account.get("mailboxes", [])
-        if not mailboxes:
-            continue
-        if acc_type not in accounts_by_type:
-            accounts_by_type[acc_type] = []
-        accounts_by_type[acc_type].extend(mailboxes)
-    
-    # 按指定顺序重建 accounts 块内容
+    # 找到所有 type 块的位置
+    blocks = {}  # {type_name: (start_line, end_line, lines_content)}
     type_order = ["gmail", "icloud", "qq", "outlook", "others"]
-    new_accounts_lines = []
     
-    for idx, acc_type in enumerate(type_order):
-        if acc_type not in accounts_by_type:
-            continue
-        
-        # 类型块间空行分隔
-        if idx > 0 and new_accounts_lines:
-            new_accounts_lines.append("")
-        
-        new_accounts_lines.append(f"- type: {acc_type}")
-        new_accounts_lines.append("  mailboxes:")
-        
-        # 添加该类型的所有 mailbox
-        for mb in accounts_by_type[acc_type]:
-            # 按字段顺序输出（label first, email second, then others）
-            field_order = ["label", "email", "apple_id", "app_pass", "gmail_refresh_token", "refresh_token"]
-            for key in field_order:
-                if key not in mb or mb[key] is None:
-                    continue
-                val = mb[key]
-                # 所有字符串值加引号
-                if isinstance(val, str):
-                    val_str = f'"{val}"'
-                else:
-                    val_str = str(val)
-                
-                if key == "label":
-                    new_accounts_lines.append(f"  - label: {val_str}")
-                else:
-                    new_accounts_lines.append(f"    {key}: {val_str}")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # 匹配 - type: XXX
+        match = re.match(r'^-\s+type:\s+(\w+)\s*$', line)
+        if match:
+            acc_type = match.group(1)
+            block_start = i
+            # 找到这个块的结束（下一个 - type: 或文件结尾）
+            block_end = i + 1
+            while block_end < len(lines):
+                if re.match(r'^-\s+type:', lines[block_end]):
+                    break
+                block_end += 1
+            blocks[acc_type] = (block_start, block_end, lines[block_start:block_end])
+            i = block_end
+        else:
+            i += 1
     
-    # 找到原文件中 accounts: 的位置和范围
-    lines = content.split('\n')
-    accounts_start = -1
-    accounts_end = len(lines)
-    
+    # 找到 accounts: 行前的所有内容
+    accounts_line = -1
     for i, line in enumerate(lines):
         if line.strip() == "accounts:":
-            accounts_start = i
-        elif accounts_start >= 0 and accounts_end == len(lines):
-            # 找到第一个非缩进行（新的顶级字段或文件结尾）
-            if line and line[0] not in (' ', '\t', '-') and ':' in line:
-                accounts_end = i
-                break
+            accounts_line = i
+            break
     
-    if accounts_start < 0:
-        return  # 没有找到 accounts 块
+    if accounts_line < 0:
+        return  # 没有 accounts 行
     
-    # 重建配置文件
-    before = '\n'.join(lines[:accounts_start + 1])  # 包含 accounts: 行
-    after = '\n'.join(lines[accounts_end:]) if accounts_end < len(lines) else ""
+    # 重新组织：accounts: 之前的内容 + 按顺序排列的 type 块
+    new_content = []
+    new_content.extend(lines[:accounts_line + 1])  # 包含 accounts:
     
-    new_content = before + '\n' + '\n'.join(new_accounts_lines)
-    if after:
-        new_content += '\n' + after
+    # 按指定顺序添加 type 块
+    for acc_type in type_order:
+        if acc_type in blocks:
+            block_start, block_end, block_lines = blocks[acc_type]
+            # 块之间添加空行（除了第一个）
+            if new_content[-1].strip() != "accounts:":
+                # 不是第一个块，检查是否需要空行
+                if new_content[-1].strip() != "":
+                    new_content.append('\n')
+            new_content.extend(block_lines)
+    
+    # 添加 accounts: 之后的内容（如果有的话）
+    accounts_end = accounts_line + 1
+    # 找到 accounts 块之后的第一个非缩进行
+    for i in range(accounts_line + 1, len(lines)):
+        if lines[i].strip() and not lines[i].startswith((' ', '\t')):
+            accounts_end = i
+            break
     else:
-        new_content += '\n'
+        accounts_end = len(lines)
+    
+    new_content.extend(lines[accounts_end:])
     
     with open(CONFIG_FILE, "w") as f:
-        f.write(new_content)
+        f.writelines(new_content)
     log.info("✓ 账号已按类型重新排序")
 
 
@@ -1792,6 +1773,9 @@ def _save_outlook_account(refresh_token: str, email: str):
     
     with open(CONFIG_FILE, "w") as f:
         f.writelines(lines)
+    
+    # 重新排序账号
+    _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1859,6 +1843,9 @@ def _save_gmail_token(email: str, refresh_token: str):
 
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
+    
+    # 重新排序账号
+    _sort_accounts()
 
 
 def start_oauth_server():
