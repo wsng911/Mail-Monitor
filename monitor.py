@@ -892,7 +892,7 @@ def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
         log.error(f"[Outlook:{email}] {e}")
         if email not in _token_fail_alerted:
             _token_fail_alerted.add(email)
-            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：[点击授权](https://oa\\.idays\\.eu\\.org/auth/outlook)")
+            send_tg(f"⚠️ Outlook 账号失效：`{_esc(email)}`\n请重新授权：[点击授权](https://oa.idays.eu.org/auth/outlook)")
     return results
 
 def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
@@ -1792,7 +1792,7 @@ def main():
     send_tg(_make_guide("📋 Gmail Push 配置备忘", [
         ("➕ 新增邮箱账号", [
             "第一步：[GCP 添加测试用户](https://console.cloud.google.com/apis/credentials/consent?project=mail-monitor-493615)",
-            "第二步：[Gmail Push 授权](https://oa\\.idays\\.eu\\.org/auth/gmail)",
+            "第二步：[Gmail Push 授权](https://oa.idays.eu.org/auth/gmail)",
         ]),
         ("🔧 新建 Pub/Sub（首次或重建）", [
             "1\\. 打开 [Pub/Sub 主题页](https://console.cloud.google.com/cloudpubsub/topic/list?project=mail-monitor-493615) → 创建主题",
@@ -1800,7 +1800,7 @@ def main():
             "3\\. 进入主题 → 权限 → 添加主账号：`gmail-api-push@system.gserviceaccount.com`，角色：Pub/Sub 发布者",
             "4\\. 打开 [订阅页](https://console.cloud.google.com/cloudpubsub/subscription/list?project=mail-monitor-493615) → 创建订阅",
             "5\\. 订阅 ID：`gmail-push-sub`，主题：`gmail-push`，类型：推送",
-            "6\\. 端点：`https://oa\\.idays\\.eu\\.org/api/gmail/push` → 创建",
+            "6\\. 端点：`https://oa.idays.eu.org/api/gmail/push` → 创建",
         ]),
         ("📋 配置信息", [
             "项目：`mail-monitor-493615`",
