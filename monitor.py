@@ -1652,30 +1652,7 @@ def _sort_accounts():
     with open(CONFIG_FILE) as f:
         lines = f.readlines()
     
-    # 找到所有 type 块的位置
-    blocks = {}  # {type_name: (start_line, end_line, lines_content)}
-    type_order = ["gmail", "icloud", "qq", "outlook", "others"]
-    
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        # 匹配 - type: XXX
-        match = re.match(r'^-\s+type:\s+(\w+)\s*$', line)
-        if match:
-            acc_type = match.group(1)
-            block_start = i
-            # 找到这个块的结束（下一个 - type: 或文件结尾）
-            block_end = i + 1
-            while block_end < len(lines):
-                if re.match(r'^-\s+type:', lines[block_end]):
-                    break
-                block_end += 1
-            blocks[acc_type] = (block_start, block_end, lines[block_start:block_end])
-            i = block_end
-        else:
-            i += 1
-    
-    # 找到 accounts: 行前的所有内容
+    # 找到 accounts: 行
     accounts_line = -1
     for i, line in enumerate(lines):
         if line.strip() == "accounts:":
@@ -1685,32 +1662,76 @@ def _sort_accounts():
     if accounts_line < 0:
         return  # 没有 accounts 行
     
-    # 重新组织：accounts: 之前的内容 + 按顺序排列的 type 块
-    new_content = []
-    new_content.extend(lines[:accounts_line + 1])  # 包含 accounts:
+    # 从 accounts: 开始，找出所有 type 块
+    blocks = {}  # {type_name: block_lines}
+    type_order = ["gmail", "icloud", "qq", "outlook", "others"]
+    
+    i = accounts_line + 1
+    while i < len(lines):
+        line = lines[i]
+        match = re.match(r'^-\s+type:\s+(\w+)\s*$', line)
+        if match:
+            acc_type = match.group(1)
+            block_lines = [line]  # 从 - type: XXX 开始
+            i += 1
+            
+            # 收集直到下一个 - type: 或非缩进行
+            while i < len(lines):
+                next_line = lines[i]
+                # 如果是新的 type 块或非账户相关行，停止
+                if re.match(r'^-\s+type:', next_line):
+                    break
+                # 如果是非缩进的新字段（yaml 顶级），停止
+                if next_line.strip() and not next_line.startswith((' ', '\t')):
+                    break
+                block_lines.append(next_line)
+                i += 1
+            
+            blocks[acc_type] = block_lines
+        else:
+            i += 1
+    
+    # 重建配置：accounts: 前 + 排序后的 type 块 + accounts: 后的内容
+    new_content = lines[:accounts_line + 1]  # 包含 accounts:
     
     # 按指定顺序添加 type 块
     for acc_type in type_order:
         if acc_type in blocks:
-            block_start, block_end, block_lines = blocks[acc_type]
-            # 块之间添加空行（除了第一个）
-            if new_content[-1].strip() != "accounts:":
-                # 不是第一个块，检查是否需要空行
-                if new_content[-1].strip() != "":
-                    new_content.append('\n')
-            new_content.extend(block_lines)
+            new_content.extend(blocks[acc_type])
     
-    # 添加 accounts: 之后的内容（如果有的话）
-    accounts_end = accounts_line + 1
-    # 找到 accounts 块之后的第一个非缩进行
+    # 添加最后一个块之后的内容（如果有）
+    # 找到第一个 type 块的起始行，之后的所有内容都属于 accounts 块
+    first_type_line = -1
     for i in range(accounts_line + 1, len(lines)):
-        if lines[i].strip() and not lines[i].startswith((' ', '\t')):
-            accounts_end = i
+        if re.match(r'^-\s+type:', lines[i]):
+            first_type_line = i
             break
-    else:
-        accounts_end = len(lines)
     
-    new_content.extend(lines[accounts_end:])
+    if first_type_line >= 0:
+        # 找到 accounts 块的真正结束（最后一个 type 块之后）
+        last_type_end = accounts_line + 1
+        for acc_type in type_order:
+            if acc_type in blocks:
+                # blocks[acc_type] 中最后一行是什么，就从那里开始找
+                pass
+        
+        # 简单方法：最后一个块的结束位置 = len(new_content)
+        # 然后添加 new_content 之后的所有行
+        # 但这需要找到原始文件中最后一个 type 块的结束位置
+        
+        # 更简单：直接找原文件中最后一个 - type: 的位置，然后找它的块结束
+        for i in range(len(lines) - 1, -1, -1):
+            if re.match(r'^-\s+type:', lines[i]):
+                # 找这个块的结束
+                j = i + 1
+                while j < len(lines):
+                    if re.match(r'^-\s+type:', lines[j]) or (lines[j].strip() and not lines[j].startswith((' ', '\t'))):
+                        break
+                    j += 1
+                # j 就是 accounts 块的结束位置
+                if j < len(lines):
+                    new_content.extend(lines[j:])
+                break
     
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_content)
