@@ -1689,7 +1689,11 @@ def _normalize_config():
             })
     
     # 第三步：如果有变化，写入临时文件，然后原子性覆盖
-    if new_accounts != config.get("accounts", []):
+    import json
+    old_json = json.dumps(config.get("accounts", []), sort_keys=True)
+    new_json = json.dumps(new_accounts, sort_keys=True)
+    
+    if old_json != new_json:
         config["accounts"] = new_accounts
         
         # 写入临时文件
@@ -1702,10 +1706,13 @@ def _normalize_config():
             # 原子性覆盖原文件
             shutil.move(temp_path, CONFIG_FILE)
             log.info(f"✓ 配置已规范化（去重+排序）")
-        except:
+        except Exception as e:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+            log.error(f"规范化失败: {e}")
             raise
+    else:
+        log.info("配置已是规范状态")
 
 
 def _save_outlook_account(refresh_token: str, email: str):
