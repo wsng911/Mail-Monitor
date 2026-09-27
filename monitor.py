@@ -1859,6 +1859,9 @@ def main():
     if OAUTH_ENABLED:
         t = threading.Thread(target=start_oauth_server, daemon=True)
         t.start()
+    
+    # 加载时自动排序配置
+    _sort_accounts()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
