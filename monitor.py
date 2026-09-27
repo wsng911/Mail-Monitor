@@ -1647,6 +1647,39 @@ def _exchange_code(code: str) -> tuple[str, str]:
     return d["refresh_token"], email
 
 
+def _deduplicate_config():
+    """去除配置中的重复账户（同 email + 同 type）"""
+    with open(CONFIG_FILE) as f:
+        lines = f.readlines()
+    
+    # 解析配置
+    config = yaml.safe_load(''.join(lines))
+    if not config or "accounts" not in config:
+        return
+    
+    # 去重：按 (type, email) 组合去重
+    seen = {}
+    for account in config.get("accounts", []):
+        acc_type = account.get("type", "")
+        mailboxes = account.get("mailboxes", []) or []
+        
+        unique_mbs = []
+        for mb in mailboxes:
+            email = mb.get("email", "")
+            key = (acc_type, email)
+            if key not in seen:
+                seen[key] = True
+                unique_mbs.append(mb)
+        
+        account["mailboxes"] = unique_mbs
+    
+    # 重写配置
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+    
+    log.info("✓ 配置已去重")
+
+
 def _sort_accounts():
     """按类型重新排序账户块（gmail → icloud → qq → outlook → others），保留原始格式"""
     with open(CONFIG_FILE) as f:
@@ -1795,8 +1828,8 @@ def _save_outlook_account(refresh_token: str, email: str):
     with open(CONFIG_FILE, "w") as f:
         f.writelines(lines)
     
-    # 重新排序账号
-    _sort_accounts()
+    # 重新排序账号（暂时禁用，排序逻辑需要修复）
+    # _sort_accounts()
 
 
 def _save_gmail_token(email: str, refresh_token: str):
@@ -1865,8 +1898,8 @@ def _save_gmail_token(email: str, refresh_token: str):
     with open(CONFIG_FILE, "w") as f:
         f.writelines(new_lines)
     
-    # 重新排序账号
-    _sort_accounts()
+    # 重新排序账号（暂时禁用，排序逻辑需要修复）
+    # _sort_accounts()
 
 
 def start_oauth_server():
@@ -1880,9 +1913,6 @@ def main():
     if OAUTH_ENABLED:
         t = threading.Thread(target=start_oauth_server, daemon=True)
         t.start()
-    
-    # 加载时自动排序配置
-    _sort_accounts()
 
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
@@ -1894,12 +1924,19 @@ def main():
         else:
             accounts.append(entry)
 
-    # 去重：同邮箱保留最后一条
+    # 去重：同邮箱+同type只保留一条（保留第一条）
     seen = {}
     for acc in accounts:
-        seen[acc.get("email", "")] = acc
+        key = (acc.get("email", ""), acc.get("type", ""))
+        if key not in seen:
+            seen[key] = acc
     accounts = list(seen.values())
-    log.info(f"加载 {len(accounts)} 个账号")
+    
+    # 如果去重后数量变少，说明有重复，需要重写配置文件
+    new_count = len(accounts)
+    if new_count != len(raw):
+        log.warning(f"检测到重复账户，去重前: {len(raw)} 条，去重后: {new_count} 条，正在修复配置...")
+        _deduplicate_config()
 
     # 启动通知
     send_tg("✅ Mail Monitor 已启动")
