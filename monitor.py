@@ -643,7 +643,7 @@ def _imap_idle_worker(acc: dict, host: str):
                                 _process_imap_uid(imap, uid, acc, label)
                         # 检查 Spam 文件夹（用 EXAMINE 只读模式，仅在 MONITOR_SPAM 为 True 时）
                         if MONITOR_SPAM:
-                            for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
+                            for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件", "Junk Email"]:
                                 try:
                                     status, _ = imap.examine(spam_folder)
                                     if status == "OK":
