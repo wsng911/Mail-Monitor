@@ -718,6 +718,7 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         if msg_id_hdr:
             with _processed_imap_msgids_lock:
                 if msg_id_hdr in _processed_imap_msgids:
+                    log.debug(f"[DEDUP] 跳过已处理邮件: {label} | UID:{uid.decode()} | MsgID:{msg_id_hdr[:20]}...")
                     imap.store(uid, "+FLAGS", "\\Seen")
                     return
                 _processed_imap_msgids.add(msg_id_hdr)
