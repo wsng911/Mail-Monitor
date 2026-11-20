@@ -1,7 +1,7 @@
 """
 邮箱验证码监控 - 多账号，支持 Gmail(应用密码/Push) + Outlook(OAuth2)
 """
-import os, re, time, imaplib, email as email_lib, logging, requests, yaml, html, threading, base64, json, ssl
+import os, re, time, imaplib, email as email_lib, logging, requests, yaml, html, threading, base64, json, ssl, httpx
 from html.parser import HTMLParser
 from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
