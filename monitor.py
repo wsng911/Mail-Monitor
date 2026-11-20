@@ -1401,8 +1401,8 @@ def _process_gmail_push(data: dict):
         if not token:
             log.warning(f"[Gmail Push] {email} token 为空，跳过处理 push 通知")
             return
-        # 用上次记录的 historyId，没有则用推送的 historyId
-        start_id = _gmail_last_history.get(email) or str(max(1, int(history_id) - 1))
+        # 用上次记录的 historyId，没有则用推送的 historyId（不减 1，避免重复处理）
+        start_id = _gmail_last_history.get(email) or str(history_id)
         r = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/history",
             headers={"Authorization": f"Bearer {token}"},
