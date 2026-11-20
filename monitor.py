@@ -1802,9 +1802,19 @@ def _normalize_config():
             in_mailboxes = False
             last_was_blank = False
             last_was_type_marker = False
+            in_accounts = False  # 标记是否已进入 accounts 块
             
             for i, line in enumerate(lines):
                 stripped = line.rstrip('\n')
+                
+                # 检测是否在 accounts 块中（第一个 - type: 标记）
+                if stripped.startswith('- type:'):
+                    in_accounts = True
+                
+                # 只对 accounts 块内的行进行格式化处理，其他行（如 server_name）原样保留
+                if not in_accounts:
+                    cleaned_lines.append(line)
+                    continue
                 
                 # 检测是否在 mailboxes 块中
                 if stripped.strip().startswith('mailboxes:'):
