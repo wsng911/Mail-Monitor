@@ -35,7 +35,8 @@ TG_CHAT_ID    = cfg["telegram"]["chat_id"]
 POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
 SERVER_NAME   = cfg.get("server_name", "")  # 自定义服务器名称
-log.info(f"[DEBUG] SERVER_NAME loaded: {repr(SERVER_NAME)}")
+MONITOR_SPAM  = cfg.get("monitor_spam", True)  # 是否监控垃圾邮箱
+log.info(f"[DEBUG] SERVER_NAME loaded: {repr(SERVER_NAME)}, MONITOR_SPAM: {MONITOR_SPAM}")
 
 # 创建禁用 SSL 验证的 requests session（用于代理环境）
 _http_session = requests.Session()
@@ -583,22 +584,23 @@ def _imap_idle_worker(acc: dict, host: str):
                         if uid not in _seen_uids:
                             _seen_uids.add(uid)
                             _process_imap_uid(imap, uid, acc, label)
-                    # 检查 Spam 文件夹（用 EXAMINE 只读模式，不改变 INBOX 状态）
-                    for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
-                        try:
-                            status, _ = imap.examine(spam_folder)
-                            if status == "OK":
-                                _, data = imap.search(None, "UNSEEN")
-                                for uid in (data[0] or b"").split():
-                                    if uid not in _seen_uids:
-                                        _seen_uids.add(uid)
-                                        log.info(f"[{tag}:SPAM] {email} 垃圾邮件新邮件")
-                                        _process_imap_uid(imap, uid, acc, label)
-                                # 切回 INBOX（SELECT 重新标记为可修改）
-                                imap.select("INBOX")
-                                break
-                        except Exception:
-                            continue
+                    # 检查 Spam 文件夹（仅在 MONITOR_SPAM 为 True 时）
+                    if MONITOR_SPAM:
+                        for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件", "Junk Email"]:
+                            try:
+                                status, _ = imap.examine(spam_folder)
+                                if status == "OK":
+                                    _, data = imap.search(None, "UNSEEN")
+                                    for uid in (data[0] or b"").split():
+                                        if uid not in _seen_uids:
+                                            _seen_uids.add(uid)
+                                            log.info(f"[{tag}:SPAM] {email} 垃圾邮件新邮件")
+                                            _process_imap_uid(imap, uid, acc, label)
+                                    # 切回 INBOX（SELECT 重新标记为可修改）
+                                    imap.select("INBOX")
+                                    break
+                            except Exception:
+                                continue
                 # 永不到达，连接断开时由外层 except 捕获并重连
 
             # 进入 IDLE 循环

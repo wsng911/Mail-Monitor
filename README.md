@@ -108,6 +108,9 @@ forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推�
 # 服务器名称（可选，用于区分不同邮件来源）
 server_name: "我的邮件服务"  # 推送时显示为 📬 [我的邮件服务] 账户标签
 
+# 是否监控垃圾邮箱（默认 true）
+monitor_spam: true      # true = 同时监控收件箱和垃圾邮箱；false = 仅监控收件箱
+
 # 全局接收模式（仅影响 Gmail 和 Outlook，QQ 永远使用 IDLE）
 # push：优先使用 Push，账号缺少授权时发 Telegram 警告并降级
 # idle：强制 IMAP IDLE / Graph API 轮询，不启动任何 Push
