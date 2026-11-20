@@ -1,7 +1,7 @@
 """
 邮箱验证码监控 - 多账号，支持 Gmail(应用密码/Push) + Outlook(OAuth2)
 """
-import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading, base64, json, ssl
+import os, re, time, imaplib, email as email_lib, logging, requests, yaml, html, threading, base64, json, ssl
 from html.parser import HTMLParser
 from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -34,6 +34,13 @@ TG_BOT_TOKEN  = cfg["telegram"]["bot_token"]
 TG_CHAT_ID    = cfg["telegram"]["chat_id"]
 POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
+SERVER_NAME   = cfg.get("server_name", "")  # 自定义服务器名称
+
+# 创建禁用 SSL 验证的 requests session（用于代理环境）
+_http_session = requests.Session()
+_http_session.verify = False  # 禁用 SSL 验证
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # OAuth2 回调服务配置
 OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
@@ -126,7 +133,7 @@ def find_code(text: str) -> str | None:
     # 降级1.5：关键词出现后向后扫描多行，匹配到第一个验证码即停止
     _KW_RE = re.compile(
         r'(?:验证码|动态码|OTP|passcode|access code|login code|your code|'
-        r'verification code|security code|one.time|auth.*code)',
+        r'verification code|security code|one.time|auth.*code|sign.in code)',
         re.IGNORECASE
     )
     _CANDIDATE_RE = re.compile(r'([A-Z0-9]{4,8})\b', re.IGNORECASE)
@@ -135,10 +142,14 @@ def find_code(text: str) -> str | None:
         if _KW_RE.search(line):
             # 从下一行开始扫描（关键词所在行通常是描述句，干扰项多）
             start = i + 1 if len(line) > 30 else i
-            scan_lines = lines[start:min(start + 6, len(lines))]
+            # 扩展扫描范围：先扫10行，后续再扫15行（处理空行较多的邮件如 Kolet）
+            scan_lines = lines[start:min(start + 10, len(lines))]
             # 两轮：先找纯6位数字，再找字母数字混合
             for pure_only in (True, False):
                 for scan_line in scan_lines:
+                    # 跳过纯空行（但其他地方有数字的行要保留）
+                    if not scan_line.strip():
+                        continue
                     for m in _CANDIDATE_RE.finditer(scan_line):
                         c = m.group(1).upper()
                         if len(set(c)) == 1:
@@ -157,6 +168,31 @@ def find_code(text: str) -> str | None:
                         if raw.isdigit() and c[:4] in ("1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025","2026","2027"):
                             continue
                         return c
+            # 如果前10行没找到，扩展到15行（处理极端情况）
+            scan_lines_extended = lines[start:min(start + 15, len(lines))]
+            if len(scan_lines_extended) > len(scan_lines):
+                for pure_only in (True, False):
+                    for scan_line in scan_lines_extended[len(scan_lines):]:
+                        if not scan_line.strip():
+                            continue
+                        for m in _CANDIDATE_RE.finditer(scan_line):
+                            c = m.group(1).upper()
+                            if len(set(c)) == 1:
+                                continue
+                            if c in ("123456", "654321", "000000"):
+                                continue
+                            if not c.isdigit() and sum(ch.isdigit() for ch in c) == 0:
+                                continue
+                            if c.isdigit() and len(c) < 6:
+                                continue
+                            if c.isdigit() and len(c) > 6:
+                                continue
+                            if pure_only and not c.isdigit():
+                                continue
+                            raw = c.replace('-', '')
+                            if raw.isdigit() and c[:4] in ("1999","2000","2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017","2018","2019","2020","2021","2022","2023","2024","2025","2026","2027"):
+                                continue
+                            return c
             break
     # 降级2：纯6位数字（要求邮件整体含验证码相关词汇才触发）
     if not re.search(r'验证|校验|确认码|激活码|动态码|verify|verification code|confirm.*code|code.*confirm|OTP|passcode|one.time|auth.*code|code.*auth', text, re.IGNORECASE):
@@ -243,7 +279,7 @@ def _esc(text: str) -> str:
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_tg(text: str) -> bool:
     try:
-        r = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+        r = _http_session.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
                        json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "MarkdownV2"}, timeout=10)
         if r.status_code == 200:
             return True
@@ -251,7 +287,7 @@ def send_tg(text: str) -> bool:
         # MarkdownV2 解析失败时降级为纯文本重试（只去掉反斜杠转义，保留原文）
         plain = re.sub(r'\\(.)', r'\1', text)  # 去掉 \ 转义，还原原始字符
         plain = re.sub(r'[`*_\[\]()~>#+=|{}.!\-]', '', plain)  # 再删 TG 特殊字符
-        r2 = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+        r2 = _http_session.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
                         json={"chat_id": TG_CHAT_ID, "text": plain},
                         timeout=10)
         return r2.status_code == 200
@@ -262,7 +298,7 @@ def send_tg(text: str) -> bool:
 def send_tg_document(filename: str, content: str):
     """发送 HTML 文件附件（无 caption，文字已单独发送）"""
     try:
-        r = httpx.post(
+        r = _http_session.post(
             f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendDocument",
             data={"chat_id": TG_CHAT_ID},
             files={"document": (filename, content.encode("utf-8"), "text/html")},
@@ -276,7 +312,7 @@ def send_tg_document(filename: str, content: str):
 def send_tg_file(filename: str, data: bytes, content_type: str = "application/octet-stream"):
     """发送二进制文件附件到 TG"""
     try:
-        r = httpx.post(
+        r = _http_session.post(
             f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendDocument",
             data={"chat_id": TG_CHAT_ID},
             files={"document": (filename, data, content_type)},
@@ -735,8 +771,13 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         apple_id_line = f"\n>{_esc('Apple ID')}: {_esc(apple_id)}" if apple_id else ""
 
         if code:
+            # 构建账户显示名称：[服务器名] 账户标签
+            account_display = to_addr
+            if SERVER_NAME:
+                account_display = f"[{SERVER_NAME}] {to_addr}"
+            
             text = (f"`{code}`\n\n"
-                    f">{_esc('📬')} *{_esc(to_addr)}*{apple_id_line}\n"
+                    f">{_esc('📬')} *{_esc(account_display)}*{apple_id_line}\n"
                     f">{_esc('发件人')}: {_esc(sender)}\n"
                     f">{_esc('时间')}: {_esc(date)}\n"
                     f">{_esc('主题')}: {_esc(subject)}")
@@ -747,7 +788,12 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                 for att in attachments:
                     send_tg_file(att["filename"], att["data"], att["content_type"])
         elif FORWARD_ALL:
-            header = (f">{_esc('📩')} *{_esc(to_addr)}*{apple_id_line}\n"
+            # 构建账户显示名称：[服务器名] 账户标签
+            account_display = to_addr
+            if SERVER_NAME:
+                account_display = f"[{SERVER_NAME}] {to_addr}"
+            
+            header = (f">{_esc('📩')} *{_esc(account_display)}*{apple_id_line}\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
                       f">{_esc('时间')}: {_esc(date)}\n"
                       f">{_esc('主题')}: {_esc(subject)}")
@@ -852,7 +898,7 @@ def _outlook_refresh(acc: dict) -> dict:
         }
         if OAUTH_CLIENT_SECRET:
             payload["client_secret"] = OAUTH_CLIENT_SECRET
-        r = httpx.post(OUTLOOK_TOKEN_URL, data=payload, timeout=15)
+        r = _http_session.post(OUTLOOK_TOKEN_URL, data=payload, timeout=15)
         d = r.json()
         if r.status_code == 200 and "access_token" in d:
             returned = d.get("scope", "").lower()
@@ -1004,7 +1050,7 @@ def _outlook_subscribe(acc: dict):
         expiry_dt = datetime.now(timezone.utc) + timedelta(days=2, hours=23)
         expiry = expiry_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        r = httpx.post(
+        r = _http_session.post(
             "https://graph.microsoft.com/v1.0/subscriptions",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={
@@ -1116,9 +1162,14 @@ def _process_outlook_push(data: dict):
                 attach_html += att_section
 
             if code or FORWARD_ALL:
+                # 构建账户显示名称：[服务器名] 账户标签
+                account_display = label
+                if SERVER_NAME:
+                    account_display = f"[{SERVER_NAME}] {label}"
+                
                 if code:
                     text = (f"`{_esc(code)}`\n\n"
-                            f">{_esc('📬')} *{_esc(label)}*\n"
+                            f">{_esc('📬')} *{_esc(account_display)}*\n"
                             f">{_esc('发件人')}: {_esc(sender)}\n"
                             f">{_esc('时间')}: {_esc(date)}\n"
                             f">{_esc('主题')}: {_esc(subject)}")
@@ -1129,7 +1180,7 @@ def _process_outlook_push(data: dict):
                         for att in attachments:
                             send_tg_file(att["filename"], att["data"], att["content_type"])
                 elif FORWARD_ALL:
-                    header = (f">{_esc('📩')} *{_esc(label)}*\n"
+                    header = (f">{_esc('📩')} *{_esc(account_display)}*\n"
                               f">{_esc('发件人')}: {_esc(sender)}\n"
                               f">{_esc('时间')}: {_esc(date)}\n"
                               f">{_esc('主题')}: {_esc(subject)}")
@@ -1172,7 +1223,7 @@ def _gmail_refresh_token(email: str) -> str:
         return ""
     if time.time() < t.get("expiry", 0) and t.get("access_token"):
         return t["access_token"]
-    r = httpx.post(GMAIL_TOKEN_URL, data={
+    r = _http_session.post(GMAIL_TOKEN_URL, data={
         "client_id": GMAIL_CLIENT_ID,
         "client_secret": GMAIL_CLIENT_SECRET,
         "refresh_token": t["refresh_token"],
@@ -1216,7 +1267,7 @@ def _gmail_watch(email: str):
         if not token:
             log.warning(f"[Gmail Push] {email} token 为空，跳过 watch 注册")
             return
-        r = httpx.post(
+        r = _http_session.post(
             f"https://gmail.googleapis.com/gmail/v1/users/me/watch",
             headers={"Authorization": f"Bearer {token}"},
             json={"topicName": GMAIL_PUBSUB_TOPIC, "labelIds": ["INBOX"]},
@@ -1320,7 +1371,7 @@ def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
         attachments = [a for a in attachments if a.get("data")]
 
         # 标为已读
-        httpx.post(
+        _http_session.post(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}/modify",
             headers={"Authorization": f"Bearer {token}"},
             json={"removeLabelIds": ["UNREAD"]},
@@ -1394,9 +1445,14 @@ def _process_gmail_push(data: dict):
                     attach_html += att_section
 
                 if code or FORWARD_ALL:
+                    # 构建账户显示名称：[服务器名] 账户标签
+                    account_display = label
+                    if SERVER_NAME:
+                        account_display = f"[{SERVER_NAME}] {label}"
+                    
                     if code:
                         text = (f"`{_esc(code)}`\n\n"
-                                f">{_esc('📬')} *{_esc(label)}*\n"
+                                f">{_esc('📬')} *{_esc(account_display)}*\n"
                                 f">{_esc('发件人')}: {_esc(item['from'])}\n"
                                 f">{_esc('时间')}: {_esc(item['date'])}\n"
                                 f">{_esc('主题')}: {_esc(item['subject'])}")
@@ -1408,7 +1464,7 @@ def _process_gmail_push(data: dict):
                             for att in attachments:
                                 send_tg_file(att["filename"], att["data"], att["content_type"])
                     elif FORWARD_ALL:
-                        header = (f">{_esc('📩')} *{_esc(label)}*\n"
+                        header = (f">{_esc('📩')} *{_esc(account_display)}*\n"
                                   f">{_esc('发件人')}: {_esc(item['from'])}\n"
                                   f">{_esc('时间')}: {_esc(item['date'])}\n"
                                   f">{_esc('主题')}: {_esc(item['subject'])}")
@@ -1524,7 +1580,7 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 return
             try:
                 redirect = f"https://oa.idays.eu.org/api/gmail/oauth/callback"
-                r = httpx.post(GMAIL_TOKEN_URL, data={
+                r = _http_session.post(GMAIL_TOKEN_URL, data={
                     "client_id": GMAIL_CLIENT_ID,
                     "client_secret": GMAIL_CLIENT_SECRET,
                     "code": code,
@@ -1592,7 +1648,7 @@ def _exchange_code(code: str) -> tuple[str, str]:
         data["client_secret"] = OAUTH_CLIENT_SECRET
     else:
         data["token_endpoint_auth_method"] = "none"
-    r = httpx.post(OUTLOOK_TOKEN_URL, data=data, timeout=15)
+    r = _http_session.post(OUTLOOK_TOKEN_URL, data=data, timeout=15)
     d = r.json()
     if "refresh_token" not in d:
         raise RuntimeError(d.get("error_description", d))

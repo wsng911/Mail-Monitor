@@ -11,7 +11,7 @@
 | Outlook | Change Notifications Push | ~2-10 秒 | OAuth2 + Azure 应用 |
 | Outlook | Graph API 轮询 | ~30 秒（可配置） | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v2.1.0`
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor) · 当前版本：`v2.2.0`
 
 ---
 
@@ -104,6 +104,9 @@ telegram:
 
 poll_interval: 30       # 轮询间隔（秒），Push/IDLE 账号不受此影响
 forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
+
+# 服务器名称（可选，用于区分不同邮件来源）
+server_name: "我的邮件服务"  # 推送时显示为 📬 [我的邮件服务] 账户标签
 
 # 全局接收模式（仅影响 Gmail 和 Outlook，QQ 永远使用 IDLE）
 # push：优先使用 Push，账号缺少授权时发 Telegram 警告并降级
