@@ -36,7 +36,7 @@ POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
 SERVER_NAME   = cfg.get("server_name", "")  # 自定义服务器名称
 MONITOR_SPAM  = cfg.get("monitor_spam", True)  # 是否监控垃圾邮箱
-log.info(f"[DEBUG] SERVER_NAME loaded: {repr(SERVER_NAME)}, MONITOR_SPAM: {MONITOR_SPAM}")
+log.info(f"[DEBUG] CONFIG LOADED - SERVER_NAME: '{SERVER_NAME}' (len={len(SERVER_NAME)}), MONITOR_SPAM: {MONITOR_SPAM}")
 
 # 创建禁用 SSL 验证的 requests session（用于代理环境）
 _http_session = requests.Session()
@@ -793,8 +793,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         elif FORWARD_ALL:
             # 构建账户显示名称：[服务器名] 账户标签
             account_display = to_addr
-            if SERVER_NAME:
-                account_display = f"[{SERVER_NAME}] {to_addr}"
+            if SERVER_NAME and SERVER_NAME.strip():  # 明确检查不为空且不为纯空白
+                account_display = f"[{SERVER_NAME.strip()}] {to_addr}"
             
             header = (f">{_esc('📩')} *{_esc(account_display)}*{apple_id_line}\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
