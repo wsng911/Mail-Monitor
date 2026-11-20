@@ -36,6 +36,10 @@ POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
 SERVER_NAME   = cfg.get("server_name", "")  # 自定义服务器名称
 MONITOR_SPAM  = cfg.get("monitor_spam", True)  # 是否监控垃圾邮箱
+# 添加详细的 SERVER_NAME 调试信息
+_sn_raw = cfg.get("server_name")
+log.info(f"[DEBUG] SERVER_NAME (raw): {repr(_sn_raw)}, type={type(_sn_raw)}")
+log.info(f"[DEBUG] SERVER_NAME (after get): {repr(SERVER_NAME)}, bool={bool(SERVER_NAME)}, stripped={repr(SERVER_NAME.strip())}")
 log.info(f"[DEBUG] CONFIG LOADED - SERVER_NAME: '{SERVER_NAME}' (len={len(SERVER_NAME)}), MONITOR_SPAM: {MONITOR_SPAM}")
 
 # 创建禁用 SSL 验证的 requests session（用于代理环境）
@@ -1452,8 +1456,10 @@ def _process_gmail_push(data: dict):
                 if code or FORWARD_ALL:
                     # 构建账户显示名称：[服务器名] 账户标签
                     account_display = label
+                    log.info(f"[PUSH_DEBUG] Gmail - label={label}, SERVER_NAME={repr(SERVER_NAME)}, check={bool(SERVER_NAME and SERVER_NAME.strip())}")
                     if SERVER_NAME and SERVER_NAME.strip():  # 明确检查不为空且不为纯空白
                         account_display = f"[{SERVER_NAME.strip()}] {label}"
+                        log.info(f"[PUSH_DEBUG] Display: {account_display}")
                     
                     if code:
                         text = (f"`{_esc(code)}`\n\n"
