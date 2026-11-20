@@ -382,11 +382,12 @@ oauth:
 - 英文：`verification code`、`security code`、`login code`、`access code`、`OTP`、`passcode`、`one-time`、`auth code`、`sign-in code`、`your code` 等
 
 **第二层：关键词后多行扫描**
-关键词和验证码不在同一行时（如 Cloudflare Access 邮件），向后扫描最多 5 行：
+关键词和验证码不在同一行时（如 Kolet、Cloudflare Access 邮件），向后扫描最多 15 行：
 - **优先匹配纯6位数字**（避免装饰性字符串如 `A2Tx8` 被误识别）
 - 无纯数字时再匹配字母数字混合码
 - 关键词所在行为长句描述时，从下一行开始扫描（跳过干扰词）
 - 纯数字至少 6 位（4位数字大概率是手机尾号/年份）
+- v2.2.0+：扩展扫描范围到 15 行以处理空行较多的邮件格式
 
 **第三层：XXXX-XXXX 格式**
 匹配 GitHub 等平台的字母数字混合格式（如 `ABCD-1234`），纯数字和纯字母均排除。
