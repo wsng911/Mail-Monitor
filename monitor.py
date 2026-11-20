@@ -637,22 +637,23 @@ def _imap_idle_worker(acc: dict, host: str):
                                 _seen_uids.add(uid)
                             for uid in new_uids:
                                 _process_imap_uid(imap, uid, acc, label)
-                        # 检查 Spam 文件夹（用 EXAMINE 只读模式）
-                        for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
-                            try:
-                                status, _ = imap.examine(spam_folder)
-                                if status == "OK":
-                                    _, data = imap.search(None, "UNSEEN")
-                                    spam_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
-                                    if spam_uids:
-                                        for uid in spam_uids:
-                                            _seen_uids.add(uid)
-                                            log.info(f"[{tag}:SPAM] {email} 检测到垃圾邮件")
-                                        for uid in spam_uids:
-                                            _process_imap_uid(imap, uid, acc, label)
-                                    break
-                            except Exception:
-                                continue
+                        # 检查 Spam 文件夹（用 EXAMINE 只读模式，仅在 MONITOR_SPAM 为 True 时）
+                        if MONITOR_SPAM:
+                            for spam_folder in ["[Gmail]/Spam", "Spam", "Junk", "垃圾邮件"]:
+                                try:
+                                    status, _ = imap.examine(spam_folder)
+                                    if status == "OK":
+                                        _, data = imap.search(None, "UNSEEN")
+                                        spam_uids = [uid for uid in (data[0] or b"").split() if uid not in _seen_uids]
+                                        if spam_uids:
+                                            for uid in spam_uids:
+                                                _seen_uids.add(uid)
+                                                log.info(f"[{tag}:SPAM] {email} 检测到垃圾邮件")
+                                            for uid in spam_uids:
+                                                _process_imap_uid(imap, uid, acc, label)
+                                        break
+                                except Exception:
+                                    continue
                         # 切回 INBOX 继续 IDLE（SELECT 确保回到可修改状态）
                         try:
                             imap.select("INBOX")
