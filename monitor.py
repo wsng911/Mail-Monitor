@@ -35,6 +35,7 @@ TG_CHAT_ID    = cfg["telegram"]["chat_id"]
 POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
 SERVER_NAME   = cfg.get("server_name", "")  # 自定义服务器名称
+log.info(f"[DEBUG] SERVER_NAME loaded: {repr(SERVER_NAME)}")
 
 # 创建禁用 SSL 验证的 requests session（用于代理环境）
 _http_session = requests.Session()
@@ -773,8 +774,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
         if code:
             # 构建账户显示名称：[服务器名] 账户标签
             account_display = to_addr
-            if SERVER_NAME:
-                account_display = f"[{SERVER_NAME}] {to_addr}"
+            if SERVER_NAME and SERVER_NAME.strip():  # 明确检查不为空且不为纯空白
+                account_display = f"[{SERVER_NAME.strip()}] {to_addr}"
             
             text = (f"`{code}`\n\n"
                     f">{_esc('📬')} *{_esc(account_display)}*{apple_id_line}\n"
@@ -1164,8 +1165,8 @@ def _process_outlook_push(data: dict):
             if code or FORWARD_ALL:
                 # 构建账户显示名称：[服务器名] 账户标签
                 account_display = label
-                if SERVER_NAME:
-                    account_display = f"[{SERVER_NAME}] {label}"
+                if SERVER_NAME and SERVER_NAME.strip():  # 明确检查不为空且不为纯空白
+                    account_display = f"[{SERVER_NAME.strip()}] {label}"
                 
                 if code:
                     text = (f"`{_esc(code)}`\n\n"
@@ -1447,8 +1448,8 @@ def _process_gmail_push(data: dict):
                 if code or FORWARD_ALL:
                     # 构建账户显示名称：[服务器名] 账户标签
                     account_display = label
-                    if SERVER_NAME:
-                        account_display = f"[{SERVER_NAME}] {label}"
+                    if SERVER_NAME and SERVER_NAME.strip():  # 明确检查不为空且不为纯空白
+                        account_display = f"[{SERVER_NAME.strip()}] {label}"
                     
                     if code:
                         text = (f"`{_esc(code)}`\n\n"
